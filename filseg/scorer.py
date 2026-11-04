@@ -105,6 +105,13 @@ class Scorer:
         return [c.rle for c, s in zip(comps, score) if s > self.tau]
 
 
+def load_scorer(path: Path) -> Scorer:
+    """Load a scorer saved by ``main`` (a dict holding the regressor, feature names and tau)."""
+    with open(path, "rb") as handle:
+        saved = pickle.load(handle)
+    return Scorer(saved["model"], saved["names"], saved["tau"])
+
+
 def make_regressor():
     from sklearn.ensemble import HistGradientBoostingRegressor
     return HistGradientBoostingRegressor(max_iter=400, learning_rate=0.05, max_leaf_nodes=31,
@@ -138,8 +145,8 @@ def main() -> None:
     names, X, y, _ = training_table(pickle.load(open(args.components, "rb")))
     model = make_regressor().fit(X, y)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.out, "wb") as handle:
-        pickle.dump(Scorer(model, names, args.tau), handle)
+    with open(args.out, "wb") as handle:  # a plain dict, so loading does not depend on how this module was run
+        pickle.dump({"model": model, "names": names, "tau": args.tau}, handle)
     print(f"fitted on {len(y)} candidates, {len(names)} features, tau {args.tau} -> {args.out}")
 
 

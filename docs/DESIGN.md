@@ -285,8 +285,23 @@ Each entry: what we tried, the result, and what we decided.
   confidence 0.85) vs 0.4153 (an earlier note said 0.4213: that was a lower line of the tune output, not the best).
   Fold 1 (run `unet_r34_1536_f1`): default-setting best 0.3852 vs 0.3893, tuned 0.4070 vs 0.4091, so no gain there.
   Folds 3 and 4 (trained on HF Jobs A100s): tuned f3 0.4192 vs 0.4140, f4 0.4263 vs 0.4190. Four folds: +0.009,
-  -0.002, +0.005, +0.007, mean +0.005, better on three of four (fold 2 still training on MPS). 1536 px is adopted
-  provisionally; the all-data 1536 model is `runs/unet_r34_1536_f-1/last.pt` (HF Jobs, 40 epochs, 53 s/epoch).
+  -0.002, +0.005, +0.007, mean +0.005, better on three of four. Fold 2 (MPS): tuned 0.4059 vs 0.3965. All five folds: +0.009, -0.002,
+  +0.009, +0.005, +0.007, mean +0.006, better on four of five, so 1536 px is adopted; the all-data 1536 model is `runs/unet_r34_1536_f-1/last.pt` (HF Jobs, 40 epochs, 53 s/epoch).
+- **Full 1536 px pipeline, 5-fold OOF (2026-11-05, `scripts/pipeline_1536.sh`)**: 1536 px folds, 4 flips, candidates and
+  scorer as above. Rule (0.45, 31, 300, 0.8) 0.4165, rule with confidence 0.85 0.4196; scorer tau 0.15 0.4213,
+  0.18 0.4220, 0.20 0.4219, 0.22 0.4219, 0.25 0.4208, so flat over 0.15-0.25; tau 0.20 is used. Per fold, rule vs scorer:
+  f0 0.4238/0.4327, f1 0.4101/0.4166, f2 0.4030/0.4083, f3 0.4169/0.4190, f4 0.4297/0.4342 (scorer better on every
+  fold). Against the submission-4 pipeline (1024 px, 2 views, rule; 0.4086) this is +0.013. Folds 3 and 4 were trained on
+  CUDA and re-predicted on MPS: probabilities differ by up to 0.015 from the CUDA ones, device rounding only.
+- **2048 px (native), folds 0 and 3 (2026-11-05, HF Jobs A100, 76 s/epoch, about 66 min and $2.75 per fold)**:
+  default-setting best val PQ f0 0.4035 (1536: 0.4029), f3 0.3876 (1536: 0.3872). No gain over 1536 px, so the
+  resolution gain stops at 1536 and no all-data 2048 model is trained. Tuned figures: `runs/tune_unet_r34_2048_f*.out`.
+- **Submission 5 candidate (2026-11-05, `submissions/sub5_r34_1536_v4_scorer.csv`)**: all-data 1536 model
+  (`runs/unet_r34_1536_f-1/last.pt`), 4 flips, scorer `weights/component_scorer_1536.pkl` (fitted on all 6,182 OOF
+  candidates, tau 0.20); 1,096 rows (submission 4: 1,306, the scorer drops low-value components), 176 of 180 images,
+  no overlapping masks; 6.4 s/image on MPS including features. 5-fold OOF of this pipeline 0.4220 vs 0.4086.
+  The scorer is saved as a plain dict (a pickled class from `python -m filseg.scorer` resolved to `__main__` and
+  failed to load).
 - **HF Jobs for training (2026-11-04, `scripts/hf/`)**: code and an image cache go to a private HF dataset repo
   (`launch.py upload`, which refuses a public repo, since the competition data is not ours to share); `launch.py run`
   starts `job.sh` on a GPU flavour with a timeout; each job uploads its run folder, `launch.py fetch` pulls it.

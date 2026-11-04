@@ -17,10 +17,10 @@ from filseg.scorer import candidates
 from filseg.train import RUNS
 
 G = {}
-def init(probs_file):
+def init(probs_file, name):
     G["groups"] = group_by_stem(load_train()); G["index"] = json.loads((CACHE / "index.json").read_text())["train"]
     G["images"] = np.load(CACHE / "train_images.npy", mmap_mode="r")
-    G["probs"] = {f: np.load(RUNS / f"unet_r34full_f{f}" / probs_file, mmap_mode="r") for f in range(5)}
+    G["probs"] = {f: np.load(RUNS / f"{name}_f{f}" / probs_file, mmap_mode="r") for f in range(5)}
 
 def work(item):
     f, i, s = item
@@ -34,10 +34,11 @@ def work(item):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--probs", default="val_probs.npy")
     ap.add_argument("--out", default=str(RUNS / "oof_components.pkl")); ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--name", default="unet_r34full")
     a = ap.parse_args()
-    items = [(f, i, s) for f in range(5) for i, s in enumerate(json.loads((RUNS / f"unet_r34full_f{f}" / "val_stems.json").read_text()))]
+    items = [(f, i, s) for f in range(5) for i, s in enumerate(json.loads((RUNS / f"{a.name}_f{f}" / "val_stems.json").read_text()))]
     if a.limit: items = items[:a.limit]
-    with ProcessPoolExecutor(4, initializer=init, initargs=(a.probs,)) as ex:
+    with ProcessPoolExecutor(4, initializer=init, initargs=(a.probs, a.name)) as ex:
         out = list(ex.map(work, items, chunksize=4))
     pickle.dump(out, open(a.out, "wb"))
     print(len(out), "images,", sum(len(o["feats"]) for o in out), "candidate components ->", a.out)

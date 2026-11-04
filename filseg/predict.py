@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import pickle
 import time
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from filseg.cache import CACHE
 from filseg.data import ROOT, SIZE, TEST_IMAGES, read_image
 from filseg.geometry import fit_disk
 from filseg.postprocess import PostConfig, instances, upsample
+from filseg.scorer import load_scorer
 from filseg.train import build_model, image_cache, predict
 
 SUBMISSIONS = ROOT / "submissions"
@@ -68,7 +68,7 @@ def main() -> None:
     stems = json.loads((CACHE / "index.json").read_text())["test"]
     images = np.load(CACHE / image_cache("test", args.images), mmap_mode="r")
     cfg = load_post(args.post)
-    scorer = pickle.load(open(args.scorer, "rb")) if args.scorer else None
+    scorer = load_scorer(args.scorer) if args.scorer else None
     started = time.time()
 
     probs = np.zeros(images.shape, np.float32)
