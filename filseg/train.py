@@ -97,17 +97,26 @@ def soft_dice_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return (1 - (2 * inter + 1) / (denom + 1)).mean()
 
 
+FLIP_VIEWS = {1: [()], 2: [(), (-1,)], 4: [(), (-1,), (-2,), (-2, -1)]}
+
+
 @torch.no_grad()
-def predict(model: torch.nn.Module, images: np.ndarray, device: str, tta: bool = True) -> np.ndarray:
-    """Sigmoid probabilities (N, R, R) float16, averaged over a horizontal flip."""
+def predict(model: torch.nn.Module, images: np.ndarray, device: str, tta: bool = True,
+            views: int = 2) -> np.ndarray:
+    """Sigmoid probabilities (N, R, R) float16, averaged over flipped views.
+
+    ``views`` 2 averages the image and its horizontal flip; 4 adds the vertical and the double
+    flip (fold 0: PQ 0.4192 vs 0.4149 with 2). ``tta=False`` is the same as ``views=1``.
+    """
     model.eval()
+    flips = FLIP_VIEWS[views if tta else 1]
     out = np.empty(images.shape, dtype=np.float16)
     for k in range(len(images)):
         x = torch.from_numpy(normalise(np.array(images[k])))[None, None].to(device)
-        p = torch.sigmoid(model(x))
-        if tta:
-            p = (p + torch.sigmoid(model(x.flip(-1))).flip(-1)) / 2
-        out[k] = p[0, 0].float().cpu().numpy()
+        p = torch.zeros_like(x)
+        for dims in flips:
+            p += torch.sigmoid(model(x.flip(dims))).flip(dims) if dims else torch.sigmoid(model(x))
+        out[k] = (p / len(flips))[0, 0].float().cpu().numpy()
     return out
 
 
@@ -138,7 +147,7 @@ def main() -> None:
 
     torch.manual_seed(0)
     np.random.seed(0)
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     run_dir = RUNS / f"{args.name}_f{args.fold}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "args.json").write_text(json.dumps(vars(args), indent=1))

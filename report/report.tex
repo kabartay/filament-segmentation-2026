@@ -53,7 +53,9 @@ segmentation quality SQ (mean IoU of the TPs) and recognition quality RQ.
 
 Our implementation of the metric reproduces the organisers' self-evaluation notebook exactly. Reading
 that code showed that it does not enforce one-to-one matching, so two overlapping predictions of one
-filament would both count as TPs. All our submissions are disjoint by construction.
+filament would both count as TPs. Duplicating our own confident out-of-fold masks would raise PQ from
+0.409 to 0.61 without detecting anything new, since PQ then tends to the SQ of the duplicated masks.
+We did not submit such files: all our submissions are disjoint by construction.
 
 \section{Method}
 \subsection{Input and target}
