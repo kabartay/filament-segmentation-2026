@@ -1,0 +1,24 @@
+{
+ "runs": [
+  "unet_r34full_f0"
+ ],
+ "post": "runs/unet_r34full_f0/post.json",
+ "entries": 225,
+ "pq": 0.4149,
+ "summary": "PQ=0.4149 SQ=0.6667 TP=1030 FP=625 FN=625",
+ "pairs_iou_gt0": 1469,
+ "mean_iou": 0.5588,
+ "mean_dice": 0.6939,
+ "gt_degree": {
+  "0": 282,
+  "1": 1292,
+  "2": 66,
+  "3": 15
+ },
+ "pred_degree": {
+  "0": 249,
+  "1": 1347,
+  "2": 52,
+  "3": 6
+ }
+}

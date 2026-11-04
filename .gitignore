@@ -1,0 +1,13 @@
+# competition data and caches (download from Kaggle into data/raw/)
+data/
+# training runs, checkpoints and saved probabilities (regenerable; the final weights live in weights/)
+runs/
+# third-party notebooks and repositories kept only for local reference
+refs/
+# generated submissions (pipeline.ipynb regenerates them)
+submissions/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+.DS_Store

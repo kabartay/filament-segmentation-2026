@@ -1,0 +1,30 @@
+{
+ "runs": [
+  "unet_r34full_f0",
+  "unet_r34full_f1",
+  "unet_r34full_f2",
+  "unet_r34full_f3",
+  "unet_r34full_f4"
+ ],
+ "post": "runs/tune_unet_r34full_f0+4/post.json",
+ "entries": 1154,
+ "pq": 0.4086,
+ "summary": "PQ=0.4086 SQ=0.6659 TP=5025 FP=3155 FN=3174",
+ "pairs_iou_gt0": 7261,
+ "mean_iou": 0.5534,
+ "mean_dice": 0.6882,
+ "gt_degree": {
+  "0": 1422,
+  "1": 6365,
+  "2": 343,
+  "3": 66,
+  "4": 3
+ },
+ "pred_degree": {
+  "0": 1218,
+  "1": 6685,
+  "2": 253,
+  "3": 22,
+  "4": 1
+ }
+}
