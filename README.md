@@ -78,8 +78,10 @@ are not used, and no external filament masks are used.
 
 ## Report
 
-`report/report.tex` is the technical report (IEEEtran conference format, 4 pages) and `report/report.pdf` its
-local build (`tectonic -X compile report/report.tex`; figures come from `docs/figures/`).
+`report/main.tex` is the technical report in the organisers' Overleaf template (ACM `sigconf`; `preamble.tex`
+and `main.bib` come with the template), and `report/main.pdf` its local build (`cd report && tectonic -X
+compile main.tex`). The figures it uses are copied into `report/figures/`, so the folder uploads to Overleaf
+as it is.
 
 ## Licence
 

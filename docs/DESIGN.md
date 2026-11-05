@@ -318,6 +318,18 @@ Each entry: what we tried, the result, and what we decided.
   images is too noisy to decide on, so folds 1-4 are training at 1536 (`NAME=unet_r34_1536 FILSEG_CACHE=data/cache1536
   scripts/train_folds.sh 1 2 3 4`, about 3 h per fold) for a 5-fold comparison and a 1536-based scorer.
 
+- **Uncertainty of the final OOF PQ (2026-11-05, `scripts/experiments/bootstrap_pq.py`, runs/bootstrap_pq.json)**:
+  bootstrap over images (all entries of an image resampled together, 2,000 resamples). Final pipeline 0.4219,
+  95% interval [0.412, 0.431]; 1024 px hand rule (submission 4) 0.4086 [0.399, 0.418]; paired gain +0.0133
+  [0.008, 0.018], no resample at or below zero. Per fold, final vs rule: 0.432/0.415, 0.415/0.409, 0.407/0.394,
+  0.421/0.409, 0.435/0.417 (mean 0.422 +- 0.012 s.d.). Scaled to the ~90 public images the interval of one
+  pipeline is about +-0.027, twice the gain, which is why the public LB shows 0.35 for both.
+- **Report moved into the organisers' template (2026-11-05)**: `report/main.tex` (ACM sigconf, from the Overleaf
+  link on the Overview page), black template text kept verbatim, pipeline diagram (TikZ), bootstrap intervals,
+  final-pipeline example figure (`scripts/experiments/qualitative_final.py`; 50th/75th/90th percentile of image PQ
+  among fold-0 images with three annotators and at least five filaments each). Four pages with acknowledgment
+  and references; the limit excludes those. The IEEEtran draft `report/report.tex` is removed (in git history).
+
 ## 6. Reference points from other entrants
 
 | Source | Method | Local PQ | LB |
@@ -330,6 +342,38 @@ Each entry: what we tried, the result, and what we decided.
 Two independent U-Net entries score 0.39-0.40 locally and 0.32-0.35 on the LB, so a
 plain semantic U-Net sits around 0.35 on the LB; the detector + refiner design is
 the one with a public score near 0.70.
+
+### Public notebook survey (2026-11-05)
+
+About 19 public notebooks read (none executed; notebooks pulled without saved outputs, so numbers are their
+own markdown claims). The only one with a documented ablation table is tushhaaarrrr
+"solar-filament-segmentation-2026-0-40" (v4): OOF host-exact pooled PQ 0.4597, public LB 0.39 (v3).
+
+| Source | Method | Local PQ | LB |
+|---|---|---|---|
+| tushhaaarrrr 0-40 (v4) | U-Net R34 + U-Net ConvNeXt-T + UNet++ R34, 5 folds, D4; component tree over 15 thresholds, LightGBM hurdle scorer (P(match) x E[IoU given match]), exact antichain DP, tau 0.26; rotation-normalised crop refiner | 0.4597 OOF | 0.39 (v3) |
+| tushhaaarrrr 0-37 | residual U-Net, 3 physical channels, components + GBM scorer | 0.4331 OOF | 0.37 |
+| muhammadshoaibaltaf V11 | YOLO26x 1280 detect + UNet++ EffB4 crops | 0.4347 (15% hold-out, pooling unclear) | not stated |
+| timgluhkikh | YOLO11s detect + crop U-Net R34 | about 0.409 | not stated |
+| pandadev0069 | YOLO26s-seg at 2048, union target | not stated | 0.36 |
+| sivapnlr80 | 5-fold Mask R-CNN, no refiner | not stated | 0.34 |
+| vmerckle | no ML: dark residual percentile threshold, up to 120 components | none | claims 0.46 (unverified) |
+
+Their reported gains (paired over 5 partitions; seed noise about +-0.002): component tree + hurdle + DP
+about +0.065 over a fixed threshold (0.372 to about 0.450); stage-2 refiner +0.006 to +0.009; ConvNeXt-T
+member +0.003, UNet++ member +0.002; RF-DETR evidence features +0.003. Reported failures: clDice/skeleton
+loss -0.045, Lovasz -0.003, no Dice term -0.006, FPN decoder -0.008, DeepLabV3+ and MAnet -0.002, temporal TTA
+-0.020, noisy-student pseudo-labels on external frames +0.003 (noise), per-annotator / leave-group-out
+modelling +0.000, isotonic calibration -0.0005. Their OOF-to-LB gap is 0.05-0.06 on every pipeline
+(0.4331/0.37, 0.4413/0.37, 0.4429/0.38, 0.4486/0.39), the same as ours (0.07); they find test frames
+indistinguishable from training frames (adversarial AUC 0.496) and report that 5 of 24 annotation groups
+are absent from training, so the gap is on the label side. Decision: try the component tree first (CPU,
+our own implementation: `scripts/experiments/component_tree.py`), then a hurdle target and spread features;
+model diversity only if GPU budget allows.
+
+Annotator identity: image ids carry a code such as `010401` (37 codes; the last two digits are the slot
+01-03 within an image, the first four look like an annotation batch). The test set has no such codes, so
+per-annotator heads could only be averaged at test time; not pursued.
 
 ## 7. Literature used
 
