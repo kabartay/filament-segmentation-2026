@@ -343,6 +343,29 @@ Two independent U-Net entries score 0.39-0.40 locally and 0.32-0.35 on the LB, s
 plain semantic U-Net sits around 0.35 on the LB; the detector + refiner design is
 the one with a public score near 0.70.
 
+- **Component tree over thresholds (2026-11-05, `scripts/experiments/component_tree.py`, runs/oof_tree_1536_v4.pkl)**:
+  candidates are the components at levels 0.30, 0.38, 0.45, 0.55, 0.65, 0.75 (closing 31 px, >= 100 px), which
+  nest into a forest (each higher-level component lies inside one lower-level component; asserted). Same 20
+  features plus the level and the area ratio to the parent; the scorer is cross-validated as before; the
+  submitted set is the exact antichain maximising sum(y_hat - tau) (dynamic programming on the forest, so the
+  masks stay disjoint). 707 images, 36,406 nodes (about 5 per level-0.45 candidate), build 34 min with 4 workers.
+  Control: level 0.45 only reproduces the submitted pipeline (0.4219 at tau 0.20). Results (best tau of 0.16-0.28):
+  plain regressor 0.4247 (tau 0.26), rows weighted by annotator count 0.4248 (0.24), hurdle P(match) x E[IoU |
+  match] 0.4252 (0.24). With six tree-context features (n_children, child_area_frac, max_child_frac, n_siblings,
+  stable_up, stable_down): weighted 0.4254 (0.24-0.26), hurdle 0.4260 (0.26), paired gain over the control
+  +0.0041 [0.0006, 0.0076] (bootstrap over images, p(gain <= 0) = 0.012), per fold 0.429/0.421/0.412/0.430/0.438
+  vs 0.432/0.415/0.407/0.421/0.435 (4 of 5 better). Gain is real but small and the best of about 30 settings
+  carries some selection optimism; far below the public notebook's +0.08 because their baseline had no scorer.
+  Next: view-spread (uncertainty) features from an HF inference job.
+
+- **View-spread maps (2026-11-05, `scripts/experiments/oof_view_spread.py`, `scripts/hf/job_spread.sh`)**: per-pixel
+  std of the four flipped views for every OOF image, from each fold's best.pt, as float16
+  (runs/unet_r34_1536_f{k}/val_spread_v4.npy, 0.67 GB per fold). One HF Job on an A10G: 63 s per fold, about
+  $0.25 including a failed first launch (the `hf` CLI takes one pattern per `--include`; with several values only
+  the first is a pattern and code was not downloaded). Local check on CPU: the mean of the four views matches
+  val_probs_v4.npy to 0.0002. Used as uncertainty features of tree nodes (spread_mean, spread_q90, spread_max,
+  spread_rel).
+
 ### Public notebook survey (2026-11-05)
 
 About 19 public notebooks read (none executed; notebooks pulled without saved outputs, so numbers are their

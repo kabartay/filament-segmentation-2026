@@ -17,7 +17,7 @@ and an antichain is disjoint by construction.
 Steps:
   build:  ``FILSEG_CACHE=data/cache1536 PYTHONPATH=. .venv/bin/python scripts/experiments/component_tree.py build``
           writes runs/oof_tree_1536_v4.pkl (one record per OOF image: features, level, parent, IoU per entry);
-  eval:   ``PYTHONPATH=. .venv/bin/python scripts/experiments/component_tree.py eval``
+  eval:   ``PYTHONPATH=. .venv/bin/python scripts/experiments/component_tree.py eval [--context] [--modes hurdle]``
           cross-validated scorer (trained on the other four folds), PQ for a range of tau, and the
           single-level control (level 0.45 only) that must reproduce the submitted pipeline.
 """
@@ -57,25 +57,31 @@ OUT = RUNS / "oof_tree_1536_v4.pkl"
 G: dict = {}
 
 
-def init() -> None:
+def init(levels: tuple[float, ...], spread: bool) -> None:
+    G["levels"] = levels
     G["groups"] = group_by_stem(load_train())
     G["index"] = json.loads((CACHE / "index.json").read_text())["train"]
     G["images"] = np.load(CACHE / "train_images.npy", mmap_mode="r")
     G["probs"] = {f: np.load(RUNS / f"{NAME}_f{f}" / PROBS, mmap_mode="r") for f in range(5)}
+    G["spread"] = ({f: np.load(RUNS / f"{NAME}_f{f}" / "val_spread_v4.npy", mmap_mode="r") for f in range(5)}
+                   if spread else None)
 
 
-def tree_candidates(full: np.ndarray, img: np.ndarray, disk) -> tuple[list[dict], list[dict], np.ndarray, np.ndarray]:
+def tree_candidates(full: np.ndarray, img: np.ndarray, disk, levels: tuple[float, ...] = LEVELS,
+                    spread: np.ndarray | None = None) -> tuple[list[dict], list[dict], np.ndarray, np.ndarray]:
     """Candidates at every level: RLEs, features, level and parent index (-1 for roots).
 
     Args:
         full: (2048, 2048) float32 probability map.
         img: (2048, 2048) uint8 raw image.
         disk: fitted solar disk.
+        levels: thresholds, increasing.
+        spread: optional (2048, 2048) per-pixel std of the four flipped views; adds uncertainty features.
     """
     rles, feats, level, parent = [], [], [], []
     prev_labels = None  # index of the node covering each pixel at the previous level, -1 outside
     mean_prob = float(full.mean())
-    for lv in LEVELS:
+    for lv in levels:
         comps = components(full, lv, CANDIDATE_CLOSE_PX, disk, min_area=CANDIDATE_MIN_AREA)
         labels = np.full(full.shape, -1, np.int32)
         for c in comps:
@@ -84,6 +90,10 @@ def tree_candidates(full: np.ndarray, img: np.ndarray, disk) -> tuple[list[dict]
             labels[mask] = idx
             ft = component_features(mask, full, img, disk, c)
             ft.update(n_comp_image=len(comps), img_mean_prob=mean_prob, level=lv)
+            if spread is not None:
+                sp = spread[mask]
+                ft.update(spread_mean=float(sp.mean()), spread_q90=float(np.quantile(sp, 0.9)),
+                          spread_max=float(sp.max()), spread_rel=float(sp.mean() / max(ft["mean"], 1e-6)))
             if prev_labels is None:
                 par = -1
             else:
@@ -103,18 +113,20 @@ def work(item: tuple[int, int, str]) -> dict:
     f, i, s = item
     full = upsample(np.asarray(G["probs"][f][i], np.float32))
     disk = fit_disk(np.array(G["images"][G["index"].index(s)]))
-    rles, feats, level, parent = tree_candidates(full, read_image(TRAIN_IMAGES / f"{s}.jpeg"), disk)
+    spread = upsample(np.asarray(G["spread"][f][i], np.float32)) if G["spread"] is not None else None
+    rles, feats, level, parent = tree_candidates(full, read_image(TRAIN_IMAGES / f"{s}.jpeg"), disk,
+                                                 G["levels"], spread)
     entries = [(len(e.rles), iou_matrix(e.rles, rles)) for e in G["groups"][s]]
     return dict(fold=f, stem=s, feats=feats, level=level, parent=parent, entries=entries)
 
 
-def build(limit: int, workers: int, out: Path) -> None:
+def build(limit: int, workers: int, out: Path, levels: tuple[float, ...] = LEVELS, spread: bool = False) -> None:
     items = [(f, i, s) for f in range(5)
              for i, s in enumerate(json.loads((RUNS / f"{NAME}_f{f}" / "val_stems.json").read_text()))]
     if limit:
         items = items[:limit]
     t0 = time.time()
-    with ProcessPoolExecutor(workers, initializer=init) as ex:
+    with ProcessPoolExecutor(workers, initializer=init, initargs=(levels, spread)) as ex:
         data = list(ex.map(work, items, chunksize=2))
     pickle.dump(data, open(out, "wb"))
     n = sum(len(d["feats"]) for d in data)
@@ -210,36 +222,101 @@ def cv_scores(data: list[dict], keep_node, mode: str = "plain") -> tuple[list[np
     return out, names
 
 
-def evaluate(path: Path) -> None:
+def add_context(data: list[dict]) -> None:
+    """Tree-context features, in place: how a node relates to its parent, children and siblings.
+
+    n_children / child_area_frac / max_child_frac: does the node break up at the next level (a merge of
+    several filaments, or a filament with weak parts)? n_siblings: how many pieces the parent splits into.
+    stable_up / stable_down: number of consecutive levels above / below over which the node keeps at least
+    85% of its area (a component that persists across thresholds has a sharp edge).
+    """
+    for d in data:
+        feats, parent = d["feats"], d["parent"]
+        n = len(feats)
+        children: list[list[int]] = [[] for _ in range(n)]
+        for j, p in enumerate(parent):
+            if p >= 0:
+                children[p].append(j)
+        area = np.array([ft["area"] for ft in feats], float)
+        up = np.zeros(n)
+        for j in range(n):  # parents come first, so their value is ready
+            p = parent[j]
+            up[j] = up[p] + 1 if p >= 0 and area[j] >= 0.85 * area[p] else 0
+        down = np.zeros(n)
+        for j in range(n - 1, -1, -1):
+            big = [c for c in children[j] if area[c] >= 0.85 * area[j]]
+            down[j] = down[big[0]] + 1 if big else 0
+        for j, ft in enumerate(feats):
+            ch = children[j]
+            ft["n_children"] = len(ch)
+            ft["child_area_frac"] = float(area[ch].sum() / area[j]) if ch else 0.0
+            ft["max_child_frac"] = float(area[ch].max() / area[j]) if ch else 0.0
+            ft["n_siblings"] = len(children[parent[j]]) - 1 if parent[j] >= 0 else 0
+            ft["stable_up"] = float(up[j])
+            ft["stable_down"] = float(down[j])
+
+
+def image_counts(data: list[dict], picks: list[list[int]]) -> np.ndarray:
+    """(images, 4) rows of (matched IoU sum, TP, FP, FN) for a selection."""
+    rows = []
+    for d, kept in zip(data, picks):
+        c = pooled([d], [kept])
+        rows.append([c.tp_iou_sum, c.tp, c.fp, c.fn])
+    return np.array(rows)
+
+
+def paired_bootstrap(a: np.ndarray, b: np.ndarray, n: int = 2000) -> dict:
+    """PQ difference a - b with a 95% interval, resampling images."""
+    pq = lambda m: m[..., 0].sum(-1) / (m[..., 1].sum(-1) + 0.5 * m[..., 2].sum(-1) + 0.5 * m[..., 3].sum(-1))
+    idx = np.random.default_rng(0).integers(0, len(a), size=(n, len(a)))
+    diff = pq(a[idx]) - pq(b[idx])
+    return dict(diff=float(pq(a) - pq(b)), ci95=[float(v) for v in np.percentile(diff, [2.5, 97.5])],
+                p_le_0=float((diff <= 0).mean()))
+
+
+def evaluate(path: Path, context: bool = False, modes: tuple[str, ...] = ("plain", "weighted", "hurdle"),
+             taus: tuple[float, ...] = (0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28), drop: tuple[str, ...] = (),
+             tag: str = "") -> None:
     data = pickle.load(open(path, "rb"))
+    if drop:  # ablation: remove features whose name starts with any of these prefixes
+        for d in data:
+            d["feats"] = [{k: v for k, v in ft.items() if not k.startswith(drop)} for ft in d["feats"]]
+    levels = sorted({float(v) for d in data for v in d["level"]})
+    if context:
+        add_context(data)
     # control: level 0.45 only, original 20 features, plain threshold -- must reproduce the submitted pipeline
     base_names = None
     idx = [np.nonzero(d["level"] == BASE_LEVEL)[0] for d in data]
-    base = [dict(d, feats=[{k: v for k, v in d["feats"][j].items() if k not in ("level", "parent_area_ratio")}
+    tree_only = {"level", "parent_area_ratio", "spread_mean", "spread_q90", "spread_max", "spread_rel", "n_children", "child_area_frac", "max_child_frac", "n_siblings",
+                 "stable_up", "stable_down"}
+    base = [dict(d, feats=[{k: v for k, v in d["feats"][j].items() if k not in tree_only}
                            for j in ix],
                  entries=[(n, m[:, ix] if m.shape[1] else m) for n, m in d["entries"]]) for d, ix in zip(data, idx)]
     s_base, base_names = cv_scores(base, lambda ft: True)
     results = {"control_level_045": {}}
+    control = image_counts(base, [list(np.nonzero(s > 0.20)[0]) for s in s_base])
     for tau in (0.18, 0.20, 0.22):
         c = pooled(base, [list(np.nonzero(s > tau)[0]) for s in s_base])
         results["control_level_045"][tau] = c.score()
         print(f"control (level 0.45 only), tau {tau:.2f}: {c.summary()}")
-    for mode in ("plain", "weighted", "hurdle"):
+    for mode in modes:
         s_all, names = cv_scores(data, lambda ft: True, mode)
-        key = f"tree_{mode}"
+        key = f"tree_{mode}" + ("_context" if context else "") + (f"_{tag}" if tag else "")
         results[key] = {}
-        for tau in (0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28):
+        for tau in taus:
             picks = [antichain(s, d["parent"], tau) for s, d in zip(s_all, data)]
             c = pooled(data, picks)
             sq = c.tp_iou_sum / max(c.tp, 1)
             per_fold = {int(f): pooled([d for d in data if d["fold"] == f],
                                        [p for p, d in zip(picks, data) if d["fold"] == f]).score() for f in range(5)}
             levels = {str(lv): int(sum(int((d["level"][np.array(p, dtype=np.int64)] == lv).sum())
-                                       for p, d in zip(picks, data))) for lv in LEVELS}
+                                       for p, d in zip(picks, data))) for lv in levels}
             results[key][tau] = dict(pq=c.score(), sq=sq, tp=c.tp, fp=c.fp, fn=c.fn, per_fold=per_fold, levels=levels)
+            results[key][tau]["vs_control"] = paired_bootstrap(image_counts(data, picks), control)
             print(f"{key}, tau {tau:.2f}: {c.summary()}  per fold "
-                  f"{ {k: round(v, 4) for k, v in per_fold.items()} }  levels {levels}", flush=True)
-    out = path.with_suffix(".json")
+                  f"{ {k: round(v, 4) for k, v in per_fold.items()} }  vs control {results[key][tau]['vs_control']}",
+                  flush=True)
+    out = path.with_name(path.stem + ("_context" if context else "") + (f"_{tag}" if tag else "") + ".json")
     out.write_text(json.dumps(results, indent=1, default=float))
     print("features:", names, "->", out)
 
@@ -250,11 +327,19 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--context", action="store_true", help="add tree-context features")
+    ap.add_argument("--levels", default=",".join(str(v) for v in LEVELS), help="build: thresholds, increasing")
+    ap.add_argument("--spread", action="store_true", help="build: add view-spread features (val_spread_v4.npy)")
+    ap.add_argument("--drop", default="", help="eval: comma-separated feature-name prefixes to leave out")
+    ap.add_argument("--tag", default="", help="eval: suffix for result keys and the output json")
+    ap.add_argument("--modes", default="plain,weighted,hurdle")
+    ap.add_argument("--taus", default="0.16,0.18,0.20,0.22,0.24,0.26,0.28")
     a = ap.parse_args()
     if a.step == "build":
-        build(a.limit, a.workers, a.out)
+        build(a.limit, a.workers, a.out, tuple(float(v) for v in a.levels.split(",")), a.spread)
     else:
-        evaluate(a.out)
+        evaluate(a.out, a.context, tuple(a.modes.split(",")), tuple(float(t) for t in a.taus.split(",")),
+                 tuple(x for x in a.drop.split(",") if x), a.tag)
 
 
 if __name__ == "__main__":
