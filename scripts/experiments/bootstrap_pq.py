@@ -7,7 +7,9 @@ resamples the same images for both pipelines.
 Pipelines compared:
   final  -- 1536 px, 4 flips, component scorer (cross-validated, tau 0.20), from the cached OOF candidates;
   rule   -- 1024 px, 2 views, hand rule of submission 4 (threshold 0.45, closing 31 px, area >= 300,
-            confidence >= 0.8), from the fold models' saved OOF probabilities.
+            confidence >= 0.8), from the fold models' saved OOF probabilities;
+  tree   -- 1536 px, tree over 12 thresholds with the hurdle scorer, context and view-spread features
+            (filseg.tree, tau 0.26), from the cached OOF nodes (runs/oof_tree12s_1536_v4.pkl).
 
 Run (FILSEG_CACHE unset, so the 1024 px cache is used for the rule pipeline):
 ``.venv/bin/python scripts/experiments/bootstrap_pq.py``
@@ -37,6 +39,8 @@ from filseg.scorer import make_regressor, training_table
 from filseg.train import RUNS
 
 COMPONENTS = RUNS / "oof_components_1536_v4.pkl"
+TREE_NODES = RUNS / "oof_tree12s_1536_v4.pkl"
+TREE_TAU = 0.26
 TAU = 0.20
 RULE = PostConfig(threshold=0.45, close_px=31, min_area=300, min_score=0.8, max_lon=90.0)
 N_BOOT = 2000
@@ -64,6 +68,30 @@ def final_per_image() -> tuple[dict[str, list[float]], dict[str, int]]:
             c.add(iou[:, kept] if iou.shape[1] else iou, n_gt, len(kept))
         rows[d["stem"]], folds[d["stem"]] = counts_row(c), d["fold"]
     return rows, folds
+
+
+def tree_per_image() -> dict[str, list[float]]:
+    """Per-image counts of the tree pipeline (hurdle scorer trained on the other four folds)."""
+    from filseg.tree import add_context, antichain, fit_hurdle
+    from filseg.tree import training_table as tree_table
+    data = pickle.load(open(TREE_NODES, "rb"))
+    for d in data:
+        add_context(d["feats"], d["parent"])
+    _, X, y, fold, w = tree_table(data)
+    score = np.zeros_like(y)
+    for f in np.unique(fold):
+        h, m = fit_hurdle(X[fold != f], y[fold != f], w[fold != f])
+        score[fold == f] = h.predict_proba(X[fold == f])[:, 1] * m.predict(X[fold == f])
+    rows, start = {}, 0
+    for d in data:
+        n = len(d["feats"])
+        kept = np.array(antichain(score[start:start + n], d["parent"], TREE_TAU), dtype=np.int64)
+        start += n
+        c = PQCounts()
+        for n_gt, iou in d["entries"]:
+            c.add(iou[:, kept] if iou.shape[1] else iou, n_gt, len(kept))
+        rows[d["stem"]] = counts_row(c)
+    return rows
 
 
 def rule_per_image() -> dict[str, list[float]]:
@@ -95,14 +123,16 @@ def pq(m: np.ndarray) -> np.ndarray:
 def main() -> None:
     final, folds = final_per_image()
     rule = rule_per_image()
+    tree = tree_per_image()
     stems = sorted(final)
-    assert set(stems) == set(rule), "the two pipelines must cover the same images"
+    assert set(stems) == set(rule) == set(tree), "the pipelines must cover the same images"
     A = np.array([final[s] for s in stems])
     B = np.array([rule[s] for s in stems])
+    T = np.array([tree[s] for s in stems])
     fold = np.array([folds[s] for s in stems])
     rng = np.random.default_rng(0)
     idx = rng.integers(0, len(stems), size=(N_BOOT, len(stems)))
-    boot_a, boot_b = pq(A[idx]), pq(B[idx])
+    boot_a, boot_b, boot_t = pq(A[idx]), pq(B[idx]), pq(T[idx])
     diff = boot_a - boot_b
     per_fold = {int(f): float(pq(A[fold == f])) for f in np.unique(fold)}
     per_fold_rule = {int(f): float(pq(B[fold == f])) for f in np.unique(fold)}
@@ -118,6 +148,14 @@ def main() -> None:
         "final_per_fold": per_fold, "rule_per_fold": per_fold_rule,
         "final_fold_mean": float(np.mean(list(per_fold.values()))),
         "final_fold_std": float(np.std(list(per_fold.values()), ddof=1)),
+        "tree_pq": float(pq(T)),
+        "tree_ci95": [float(v) for v in np.percentile(boot_t, [2.5, 97.5])],
+        "tree_minus_final": float(pq(T) - pq(A)),
+        "tree_minus_final_ci95": [float(v) for v in np.percentile(boot_t - boot_a, [2.5, 97.5])],
+        "tree_minus_rule": float(pq(T) - pq(B)),
+        "tree_minus_rule_ci95": [float(v) for v in np.percentile(boot_t - boot_b, [2.5, 97.5])],
+        "tree_per_fold": {int(f): float(pq(T[fold == f])) for f in np.unique(fold)},
+        "tree_fold_std": float(np.std([pq(T[fold == f]) for f in np.unique(fold)], ddof=1)),
         "n_boot": N_BOOT,
     }
     path = RUNS / "bootstrap_pq.json"

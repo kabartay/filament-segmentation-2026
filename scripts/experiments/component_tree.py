@@ -1,5 +1,8 @@
 """Multi-threshold candidates: a component tree with the learned scorer and an exact antichain selection.
 
+The tree, context features and selection live in ``filseg.tree`` (shared with inference); this script builds
+the out-of-fold node cache and evaluates scorer variants.
+
 The single-threshold pipeline takes the components of the probability map at 0.45 as candidates. A
 filament whose best mask comes from another threshold (thinner at 0.65, or split from a neighbour it is
 merged with at 0.45) cannot be chosen. Here the candidates are the components at several thresholds
@@ -38,14 +41,15 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from pycocotools import mask as mask_util
 
 from filseg.cache import CACHE
 from filseg.data import TRAIN_IMAGES, group_by_stem, load_train, read_image
 from filseg.geometry import fit_disk
 from filseg.metric import PQCounts, iou_matrix
-from filseg.postprocess import components, upsample
-from filseg.scorer import CANDIDATE_CLOSE_PX, CANDIDATE_MIN_AREA, component_features, make_regressor
+from filseg.postprocess import upsample
+from filseg.scorer import make_regressor
+from filseg.tree import add_context as add_context_one
+from filseg.tree import antichain, make_classifier, tree_candidates
 from filseg.train import RUNS
 
 LEVELS = (0.30, 0.38, 0.45, 0.55, 0.65, 0.75)
@@ -65,48 +69,6 @@ def init(levels: tuple[float, ...], spread: bool) -> None:
     G["probs"] = {f: np.load(RUNS / f"{NAME}_f{f}" / PROBS, mmap_mode="r") for f in range(5)}
     G["spread"] = ({f: np.load(RUNS / f"{NAME}_f{f}" / "val_spread_v4.npy", mmap_mode="r") for f in range(5)}
                    if spread else None)
-
-
-def tree_candidates(full: np.ndarray, img: np.ndarray, disk, levels: tuple[float, ...] = LEVELS,
-                    spread: np.ndarray | None = None) -> tuple[list[dict], list[dict], np.ndarray, np.ndarray]:
-    """Candidates at every level: RLEs, features, level and parent index (-1 for roots).
-
-    Args:
-        full: (2048, 2048) float32 probability map.
-        img: (2048, 2048) uint8 raw image.
-        disk: fitted solar disk.
-        levels: thresholds, increasing.
-        spread: optional (2048, 2048) per-pixel std of the four flipped views; adds uncertainty features.
-    """
-    rles, feats, level, parent = [], [], [], []
-    prev_labels = None  # index of the node covering each pixel at the previous level, -1 outside
-    mean_prob = float(full.mean())
-    for lv in levels:
-        comps = components(full, lv, CANDIDATE_CLOSE_PX, disk, min_area=CANDIDATE_MIN_AREA)
-        labels = np.full(full.shape, -1, np.int32)
-        for c in comps:
-            mask = mask_util.decode(c.rle).astype(bool)
-            idx = len(rles)
-            labels[mask] = idx
-            ft = component_features(mask, full, img, disk, c)
-            ft.update(n_comp_image=len(comps), img_mean_prob=mean_prob, level=lv)
-            if spread is not None:
-                sp = spread[mask]
-                ft.update(spread_mean=float(sp.mean()), spread_q90=float(np.quantile(sp, 0.9)),
-                          spread_max=float(sp.max()), spread_rel=float(sp.mean() / max(ft["mean"], 1e-6)))
-            if prev_labels is None:
-                par = -1
-            else:
-                ys, xs = np.nonzero(mask)
-                par = int(prev_labels[ys[0], xs[0]])
-                assert par >= 0, "a higher-level component must lie inside a lower-level one"
-            ft["parent_area_ratio"] = c.area / feats[par]["area"] if par >= 0 else 1.0
-            rles.append(c.rle)
-            feats.append(ft)
-            level.append(lv)
-            parent.append(par)
-        prev_labels = labels
-    return rles, feats, np.array(level), np.array(parent, dtype=np.int64)
 
 
 def work(item: tuple[int, int, str]) -> dict:
@@ -152,30 +114,6 @@ def table(data: list[dict], names: list[str] | None = None):
     return names, np.array(X), np.array(y), np.array(fold), np.array(weight, float)
 
 
-def antichain(score: np.ndarray, parent: np.ndarray, tau: float) -> list[int]:
-    """Disjoint node set maximising sum(score - tau) on the forest given by ``parent``."""
-    n = len(score)
-    children: list[list[int]] = [[] for _ in range(n)]
-    for j, p in enumerate(parent):
-        if p >= 0:
-            children[p].append(j)
-    best = np.zeros(n)
-    take = np.zeros(n, bool)
-    for j in range(n - 1, -1, -1):  # children always have larger indices than their parent
-        below = sum(best[c] for c in children[j])
-        own = score[j] - tau
-        take[j] = own > 0 and own >= below
-        best[j] = max(own, below, 0.0)
-    out, stack = [], [j for j in range(n) if parent[j] < 0]
-    while stack:
-        j = stack.pop()
-        if take[j]:
-            out.append(j)
-        else:
-            stack.extend(children[j])
-    return out
-
-
 def pooled(data: list[dict], picks: list[list[int]]) -> PQCounts:
     total = PQCounts()
     for d, kept in zip(data, picks):
@@ -183,12 +121,6 @@ def pooled(data: list[dict], picks: list[list[int]]) -> PQCounts:
         for n_gt, iou in d["entries"]:
             total.add(iou[:, kept] if iou.shape[1] else iou, n_gt, len(kept))
     return total
-
-
-def make_classifier():
-    from sklearn.ensemble import HistGradientBoostingClassifier
-    return HistGradientBoostingClassifier(max_iter=400, learning_rate=0.05, max_leaf_nodes=31,
-                                          min_samples_leaf=40, l2_regularization=1.0, random_state=0)
 
 
 def fit_predict(mode: str, X: np.ndarray, y: np.ndarray, w: np.ndarray, Xt: np.ndarray) -> np.ndarray:
@@ -223,37 +155,9 @@ def cv_scores(data: list[dict], keep_node, mode: str = "plain") -> tuple[list[np
 
 
 def add_context(data: list[dict]) -> None:
-    """Tree-context features, in place: how a node relates to its parent, children and siblings.
-
-    n_children / child_area_frac / max_child_frac: does the node break up at the next level (a merge of
-    several filaments, or a filament with weak parts)? n_siblings: how many pieces the parent splits into.
-    stable_up / stable_down: number of consecutive levels above / below over which the node keeps at least
-    85% of its area (a component that persists across thresholds has a sharp edge).
-    """
+    """Tree-context features of every image's nodes, in place (``filseg.tree.add_context``)."""
     for d in data:
-        feats, parent = d["feats"], d["parent"]
-        n = len(feats)
-        children: list[list[int]] = [[] for _ in range(n)]
-        for j, p in enumerate(parent):
-            if p >= 0:
-                children[p].append(j)
-        area = np.array([ft["area"] for ft in feats], float)
-        up = np.zeros(n)
-        for j in range(n):  # parents come first, so their value is ready
-            p = parent[j]
-            up[j] = up[p] + 1 if p >= 0 and area[j] >= 0.85 * area[p] else 0
-        down = np.zeros(n)
-        for j in range(n - 1, -1, -1):
-            big = [c for c in children[j] if area[c] >= 0.85 * area[j]]
-            down[j] = down[big[0]] + 1 if big else 0
-        for j, ft in enumerate(feats):
-            ch = children[j]
-            ft["n_children"] = len(ch)
-            ft["child_area_frac"] = float(area[ch].sum() / area[j]) if ch else 0.0
-            ft["max_child_frac"] = float(area[ch].max() / area[j]) if ch else 0.0
-            ft["n_siblings"] = len(children[parent[j]]) - 1 if parent[j] >= 0 else 0
-            ft["stable_up"] = float(up[j])
-            ft["stable_down"] = float(down[j])
+        add_context_one(d["feats"], d["parent"])
 
 
 def image_counts(data: list[dict], picks: list[list[int]]) -> np.ndarray:

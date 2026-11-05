@@ -8,7 +8,8 @@ organisers will compute on the test set.
 
 Run: ``.venv/bin/python -m filseg.report --run unet_r34full_f0 --post runs/unet_r34full_f0/post.json``
 or, for the component-scorer pipeline, from cached OOF candidates with a cross-validated scorer:
-``.venv/bin/python -m filseg.report --components runs/oof_components_1536_v4.pkl --tau 0.20 --name oof1536``
+``.venv/bin/python -m filseg.report --components runs/oof_components_1536_v4.pkl --tau 0.20 --name oof1536``;
+for the tree pipeline: ``.venv/bin/python -m filseg.report --tree runs/oof_tree12s_1536_v4.pkl --tau 0.26 --name ooftree``
 """
 
 from __future__ import annotations
@@ -76,6 +77,30 @@ def collect_scored(components: Path, tau: float) -> tuple[list[np.ndarray], PQCo
     return matrices, total
 
 
+def collect_tree(nodes: Path, tau: float) -> tuple[list[np.ndarray], PQCounts]:
+    """As ``collect``, for the tree pipeline: antichains chosen with a hurdle scorer trained on the other four folds."""
+    from filseg.tree import add_context, antichain, fit_hurdle
+    from filseg.tree import training_table as tree_table
+    data = pickle.load(open(nodes, "rb"))
+    for d in data:
+        add_context(d["feats"], d["parent"])
+    _, X, y, fold, w = tree_table(data)
+    score = np.zeros_like(y)
+    for f in np.unique(fold):
+        h, m = fit_hurdle(X[fold != f], y[fold != f], w[fold != f])
+        score[fold == f] = h.predict_proba(X[fold == f])[:, 1] * m.predict(X[fold == f])
+    matrices, total, start = [], PQCounts(), 0
+    for d in data:
+        n = len(d["feats"])
+        kept = np.array(antichain(score[start:start + n], d["parent"], tau), dtype=np.int64)
+        start += n
+        for n_gt, iou in d["entries"]:
+            iou = iou[:, kept] if iou.shape[1] else iou
+            total.add(iou, n_gt, len(kept))
+            matrices.append(iou)
+    return matrices, total
+
+
 def distribution(values: np.ndarray, title: str, label: str, path: Path) -> None:
     """Histogram of pair scores above zero, as probabilities, with the mean marked."""
     counts, edges = np.histogram(values, bins=np.linspace(0, 1, 51))
@@ -130,11 +155,14 @@ def main() -> None:
     parser.add_argument("--run", nargs="+", help="one run, or one per fold to pool")
     parser.add_argument("--post", type=Path, help="post.json or tune.json to apply")
     parser.add_argument("--components", type=Path, help="cached OOF candidates (scorer pipeline) instead of --run")
+    parser.add_argument("--tree", type=Path, help="cached OOF tree nodes (tree pipeline) instead of --run")
     parser.add_argument("--tau", type=float, default=0.20)
     parser.add_argument("--name", default="oof")
     args = parser.parse_args()
 
-    if args.components:
+    if args.tree:
+        matrices, total = collect_tree(args.tree, args.tau)
+    elif args.components:
         matrices, total = collect_scored(args.components, args.tau)
     else:
         matrices, total = collect(args.run, args.post)
@@ -147,7 +175,7 @@ def main() -> None:
     distribution(iou, "IoU distribution", "IoU", FIGURES / f"{args.name}_iou.png")
     distribution(dice, "Dice distribution", "Dice", FIGURES / f"{args.name}_dice.png")
     many_to_one(gt, pred, FIGURES / f"{args.name}_m2n.png")
-    stats = {"runs": args.run, "post": str(args.post) if args.post else f"scorer tau {args.tau} on {args.components}", "entries": len(matrices), "pq": round(total.score(), 4),
+    stats = {"runs": args.run, "post": str(args.post) if args.post else f"{'tree' if args.tree else 'scorer'} tau {args.tau} on {args.tree or args.components}", "entries": len(matrices), "pq": round(total.score(), 4),
              "summary": total.summary(), "pairs_iou_gt0": int(iou.size),
              "mean_iou": round(float(iou.mean()), 4), "mean_dice": round(float(dice.mean()), 4),
              "gt_degree": dict(sorted(gt.items())), "pred_degree": dict(sorted(pred.items()))}

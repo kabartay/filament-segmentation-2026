@@ -24,7 +24,8 @@ from filseg.data import ROOT, SIZE, TEST_IMAGES, read_image
 from filseg.geometry import fit_disk
 from filseg.postprocess import PostConfig, instances, upsample
 from filseg.scorer import load_scorer
-from filseg.train import build_model, image_cache, predict
+from filseg.train import build_model, image_cache, predict, predict_with_spread
+from filseg.tree import load_tree_scorer
 
 SUBMISSIONS = ROOT / "submissions"
 
@@ -62,6 +63,8 @@ def main() -> None:
     parser.add_argument("--views", type=int, default=2, choices=[1, 2, 4], help="flip views to average")
     parser.add_argument("--scorer", type=Path, default=None,
                         help="component scorer pickle (filseg.scorer); replaces the --post rule")
+    parser.add_argument("--tree-scorer", type=Path, default=None,
+                        help="tree scorer pickle (filseg.tree); 4 views with their spread; replaces --scorer and --post")
     args = parser.parse_args()
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -69,19 +72,30 @@ def main() -> None:
     images = np.load(CACHE / image_cache("test", args.images), mmap_mode="r")
     cfg = load_post(args.post)
     scorer = load_scorer(args.scorer) if args.scorer else None
+    tree = load_tree_scorer(args.tree_scorer) if args.tree_scorer else None
+    if tree is not None:
+        assert len(args.weights) == 1 and args.views == 4, "the tree scorer takes one model and its four views"
     started = time.time()
 
     probs = np.zeros(images.shape, np.float32)
+    spread = None
     for weights in args.weights:
         model = build_model(args.encoder, pretrained=False).to(device)
         model.load_state_dict(torch.load(weights, map_location=device))
-        probs += predict(model, images, device, views=args.views).astype(np.float32) / len(args.weights)
+        if tree is not None:
+            mean, spread = predict_with_spread(model, images, device)
+            probs += mean.astype(np.float32)
+        else:
+            probs += predict(model, images, device, views=args.views).astype(np.float32) / len(args.weights)
 
     rows = []
     plain = np.load(CACHE / "test_images.npy", mmap_mode="r")  # the disk is fitted on the plain image
     for k, stem in enumerate(stems):
         disk = fit_disk(np.array(plain[k]))
-        if scorer is not None:
+        if tree is not None:
+            kept = tree.select(upsample(probs[k]), read_image(TEST_IMAGES / f"{stem}.jpeg"), disk,
+                               upsample(spread[k].astype(np.float32)))
+        elif scorer is not None:
             kept = scorer.select(upsample(probs[k]), read_image(TEST_IMAGES / f"{stem}.jpeg"), disk)
         else:
             kept = instances(probs[k], cfg, disk)
@@ -93,7 +107,12 @@ def main() -> None:
     out = SUBMISSIONS / f"{args.name}.csv"
     write_csv(rows, out, stems)
     with_preds = len({r[0].rsplit('_', 1)[0] for r in rows})
-    selection = {"scorer": str(args.scorer), "tau": scorer.tau} if scorer else cfg.__dict__
+    if tree is not None:
+        selection = {"tree_scorer": str(args.tree_scorer), "tau": tree.tau, "levels": list(tree.levels)}
+    elif scorer is not None:
+        selection = {"scorer": str(args.scorer), "tau": scorer.tau}
+    else:
+        selection = cfg.__dict__
     meta = {"weights": args.weights, "views": args.views, "post": selection, "rows": len(rows),
             "images_with_predictions": with_preds, "images": len(stems),
             "seconds": round(elapsed, 1), "seconds_per_image": round(elapsed / len(stems), 3)}

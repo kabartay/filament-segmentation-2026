@@ -36,7 +36,7 @@
 
 \begin{document}
 
-\title{A Consensus-Trained U-Net with a Learned Component Scorer}  % Replace this with your title
+\title{A Consensus-Trained U-Net with Learned Instance Selection on a Threshold Tree}  % Replace this with your title
 \subtitle{A Solution to the Solar Filament Segmentation Challenge 2026} % DO NOT CHANGE
 
 
@@ -44,7 +44,7 @@
 \email{mukharbek.organokov@gmail.com}
 
 \begin{abstract}
-    This report describes our solution to the Solar Filament Segmentation Challenge~2026, a Kaggle competition on automatic segmentation of solar filaments in GONG H-$\alpha$ observations. A single U-Net with a ResNet-34 encoder, run at 1536~px, is trained on the consensus of the annotators and averaged over four flipped views. Its connected components are candidates, and a gradient-boosted component scorer, trained on out-of-fold candidates, predicts each candidate's expected contribution to Panoptic Quality (PQ) and keeps those that pay. On all 707 training images, scored out of fold with a split by calendar month, the pipeline reaches PQ 0.422 (95\% bootstrap interval 0.412--0.431), against 0.409 for the same network at 1024~px with a hand-tuned rule; one MAGFiLO annotator scored against another on the same images reaches 0.340. The public leaderboard gives 0.35. We list the variants that did not help and show that most of the remaining loss is disagreement between annotators.
+    This report describes our solution to the Solar Filament Segmentation Challenge~2026, a Kaggle competition on automatic segmentation of solar filaments in GONG H-$\alpha$ observations. A single U-Net with a ResNet-34 encoder, run at 1536~px, is trained on the consensus of the annotators and averaged over four flipped views. Its connected components at twelve thresholds form a tree of nested candidates; a gradient-boosted hurdle model, trained on out-of-fold candidates, predicts each one's expected contribution to Panoptic Quality (PQ) from its shape, contrast, position, place in the tree and the disagreement of the four views, and the disjoint set with the largest expected gain is chosen exactly on the tree. On all 707 training images, scored out of fold with a split by calendar month, the pipeline reaches PQ 0.427 (95\% bootstrap interval 0.417--0.436), against 0.422 with candidates from a single threshold and 0.409 for the same network at 1024~px with a hand-tuned rule; one MAGFiLO annotator scored against another on the same images reaches 0.340. The public leaderboard gives 0.35. We list the variants that did not help and show that most of the remaining loss is disagreement between annotators.
 \end{abstract}
 
 \maketitle
@@ -64,7 +64,7 @@ Guide mode is on.}
 \section{Introduction}
     This report goes over the details of our submitted solution to the Solar Filament Segmentation Challenge~2026 \cite{filament-segmentation-2026}. The challenge, launched on July~10,~2026, is organized by the Earth-Space AI Research (ESAIR) Lab\footnote{\href{https://www.esairlab.com/home}{www.esairlab.com/}}. This challenge utilizes the MAGFiLO dataset for evaluation of the segmentation algorithms \cite{ahmadzadeh2024dataset}.
 
-    One property of the data shapes every decision: the annotators disagree strongly, and each annotator is scored separately against the same prediction. A prediction can therefore never match all annotators, and the best achievable PQ is far below 1. Our solution is (i) a simple, reproducible segmenter trained on the annotators' consensus; (ii) a learned component scorer that decides which instances to submit by their expected PQ contribution; and (iii) an error analysis, with the annotator-vs-annotator score as a reference, that explains why the usual improvements did not help. Only the competition's training images and annotations are used; no external filament masks, spines or chirality labels. Code, weights and a notebook that reproduces the submission are in the repository, and every experiment is logged in \texttt{docs/DESIGN.md}.
+    One property of the data shapes every decision: the annotators disagree strongly, and each annotator is scored separately against the same prediction. A prediction can therefore never match all annotators, and the best achievable PQ is far below 1. Our solution is (i) a simple, reproducible segmenter trained on the annotators' consensus; (ii) learned instance selection: candidates from twelve thresholds, a scorer of their expected PQ contribution and an exact choice of the best disjoint set; and (iii) an error analysis, with the annotator-vs-annotator score as a reference, that explains why the usual improvements did not help. Only the competition's training images and annotations are used; no external filament masks, spines or chirality labels. Code, weights and a notebook that reproduces the submission are in the repository, and every experiment is logged in \texttt{docs/DESIGN.md}.
 
 
 % ==================================== %
@@ -81,10 +81,10 @@ Guide mode is on.}
   node distance=0.32cm]
 \node[box] (img) {H-$\alpha$ image\\2048$\times$2048, 8-bit};
 \node[box, right=of img] (pre) {area down-sample to 1536~px, fixed normalisation};
-\node[box, right=of pre] (net) {U-Net ResNet-34, 4 flips averaged};
-\node[box, right=of net] (cand) {up-sample to 2048~px, threshold 0.45, closing 31~px for grouping, components $\geq$100~px};
-\node[box, right=of cand] (feat) {20 features per candidate (shape, probability, contrast, disk position)};
-\node[box, right=of feat] (sc) {gradient-boosted scorer: keep if $\hat y > 0.20$};
+\node[box, right=of pre] (net) {U-Net ResNet-34, 4 flips: mean and spread};
+\node[box, right=of net] (cand) {up-sample to 2048~px; components $\geq$100~px at 12 thresholds 0.25--0.80 form a tree};
+\node[box, right=of cand] (feat) {32 features per node: shape, probability, contrast, position, tree context, view spread};
+\node[box, right=of feat] (sc) {hurdle scorer $\hat y$; best disjoint set: max $\sum(\hat y - 0.26)$ on the tree};
 \node[box, right=of sc] (out) {disjoint instance masks (RLE)};
 \foreach \a/\b in {img/pre, pre/net, net/cand, cand/feat, feat/sc, sc/out} \draw[arr] (\a) -- (\b);
 \node[train, below=0.45cm of net] (cons) {consensus target: fraction of annotators per pixel};
@@ -103,18 +103,18 @@ The training set has 707 images (2048$\times$2048~px) with 8{,}199 annotated fil
 \subsection{Input, target and network}
 Each image is area-downsampled from 2048 to 1536~px and normalised with fixed constants; there is no other pre-processing. The training target is the consensus, i.e.\ the fraction of annotators marking each pixel, computed at 2048~px and then downsampled. With binary cross-entropy (BCE) on this soft target the network learns the probability that an annotator marks a pixel, which is the quantity the multi-annotator metric rewards. The network is a U-Net~\cite{unet} from \texttt{segmentation\_models\_pytorch}~\cite{smp} with an ImageNet ResNet-34 encoder~\cite{resnet} adapted to one input channel (24.4~M parameters). Loss: BCE + soft Dice. AdamW, learning rate $5\cdot10^{-4}$ with one epoch of warm-up and cosine decay, weight decay $10^{-4}$, batch 4, 40 epochs. Augmentation: flips, 90-degree rotations, affine ($\pm30^\circ$, scale 0.9--1.1), brightness, contrast and gamma. The submitted model is trained on all 707 images (36~min on one NVIDIA A100, about 3~h on an Apple M3 Max).
 
-\subsection{From probabilities to instances}
-At inference the probability is averaged over four views (identity, horizontal, vertical and both flips) and upsampled bilinearly to 2048~px. The map is thresholded at 0.45. A morphological closing with a 31~px disk is used only to decide which fragments belong to one filament; the masks keep the thresholded pixels. The 8-connected components of at least 100~px are the candidates, disjoint by construction (Fig.~\ref{fig:pipeline}).
+\subsection{Candidates: a tree over thresholds}
+At inference the network sees four views (identity, horizontal, vertical and both flips); their mean is the probability map and their per-pixel standard deviation (the \emph{view spread}) marks where the model is unsure. Both are upsampled bilinearly to 2048~px. The map is thresholded at twelve levels, 0.25 to 0.80 in steps of 0.05. At each level a morphological closing with a 31~px disk decides which fragments belong to one filament (the masks keep the thresholded pixels), and the 8-connected components of at least 100~px are candidates. Thresholding and closing are monotone, so every component at a higher level lies inside exactly one component at the next lower level: the candidates form a forest. A filament can thus be taken whole at a low threshold, thinner at a high one, or separated at a higher level from a neighbour it merges with lower down (Fig.~\ref{fig:pipeline}).
 
-\subsection{Component scorer}
-Every false positive costs half a point in the PQ denominator, so which candidates are submitted matters as much as their shape. A kept candidate that matches $k$ of the $n$ entries of its image adds about $k\cdot\mathrm{IoU}$ to the numerator and $0.5n$ to the denominator either way, so it pays when its expected matched IoU per entry exceeds about PQ/2. We therefore regress, for each out-of-fold candidate, the target $y = \frac{1}{n}\sum_{e} \mathrm{IoU}_e\,[\mathrm{IoU}_e > 0.5]$ over the entries $e$ of its image, with scikit-learn's \texttt{HistGradientBoostingRegressor}~\cite{sklearn} (400 iterations, learning rate 0.05, 31 leaves, at least 40 samples per leaf, L2 1.0). It uses 20 features: area and log-area; mean, maximum, standard deviation, 10/50/90\% quantiles of the probability and the fraction above 0.8; elongation, length, width and compactness; the brightness inside and its contrast with a 15~px ring around the component; distance from the disk centre, latitude and longitude on a disk fitted with a Hough circle; and two image-level features (number of candidates and mean probability). We keep candidates with $\hat y > \tau = 0.20$; PQ varies by less than 0.001 over $\tau = 0.15$--$0.25$. A hand rule (area $\geq 300$~px and mean probability $\geq 0.8$) was used before. The whole inference, features included, takes 4.5~s per image on an M3 Max.
+\subsection{Instance selection}
+Every false positive costs half a point in the PQ denominator, so which candidates are submitted matters as much as their shape. A kept candidate that matches $k$ of the $n$ entries of its image adds about $k\cdot\mathrm{IoU}$ to the numerator and $0.5n$ to the denominator either way, so it pays when its expected matched IoU per entry, $y = \frac{1}{n}\sum_{e} \mathrm{IoU}_e\,[\mathrm{IoU}_e > 0.5]$ over the entries $e$ of its image, exceeds about PQ/2. We predict $y$ for every node of the tree with a hurdle model, $\hat y = P(y>0)\cdot E[y \mid y>0]$, both parts gradient-boosted trees from scikit-learn~\cite{sklearn} (\texttt{HistGradientBoosting}, 400 iterations, learning rate 0.05, 31 leaves, at least 40 samples per leaf, L2 1.0), trained on out-of-fold nodes with rows weighted by the image's number of entries, as pooled PQ weights them. The 32 features are: area and log-area; the mean, maximum, standard deviation, 10/50/90\% quantiles of the probability inside and the fraction above 0.8; elongation, length, width and compactness; the brightness inside and its contrast with a 15~px ring; distance from the disk centre, latitude and longitude on a disk fitted with a Hough circle; the number of candidates and the mean probability of the image; the node's threshold, its area relative to its parent, its number of children and siblings, the share of its area its children keep, and the number of levels over which it keeps 85\% of its area; and the mean, 90\% quantile, maximum and relative value of the view spread inside it. The submission is the set of disjoint nodes (an antichain of the forest) maximising $\sum(\hat y - \tau)$, which dynamic programming solves exactly: $f(v) = \max(\hat y_v - \tau, \sum_{c} f(c))$ over the children $c$ of $v$. We use $\tau = 0.26$, the middle of a range (0.24--0.28) over which OOF PQ varies by 0.0004. Inference takes 8.6~s per image on an M3 Max.
 
 \subsection{Validation split and tuning}
-Filaments persist for days, so images from the same week are near-duplicates. We use a 5-fold \texttt{GroupKFold} grouped by calendar month (YYYYMM), so no month is in both training and validation. The threshold and closing are grid-searched with the exact metric on the pooled out-of-fold (OOF) probabilities of the five fold models. The scorer is cross-validated on the same folds: the scorer applied to a fold's candidates is trained on the other four, so every OOF number below comes from models that never saw the image. All choices were made on OOF, never on the public leaderboard, which covers about 90 test images and shows two decimals.
+Filaments persist for days, so images from the same week are near-duplicates. We use a 5-fold \texttt{GroupKFold} grouped by calendar month (YYYYMM), so no month is in both training and validation. The threshold and closing are grid-searched with the exact metric on the pooled out-of-fold (OOF) probabilities of the five fold models. The scorer is cross-validated on the same folds: the scorer applied to a fold's nodes is trained on the other four, so every OOF number below comes from models that never saw the image. The view spread of the OOF images is computed by each fold's model, as at test time. All choices were made on OOF, never on the public leaderboard, which covers about 90 test images and shows two decimals.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{qualitative_final.jpg}
+\includegraphics[width=\textwidth]{qualitative_tree.jpg}
 \caption{Out-of-fold predictions of the final pipeline (red) on three validation images with three annotators (green, yellow, blue), at the 50th, 75th and 90th percentile of image PQ among images with at least five filaments per annotator. Many misses are filaments marked by one annotator only.}
 \label{fig:qual}
 \end{figure*}
@@ -137,32 +137,36 @@ Table~\ref{tab:main} gives the main numbers. Uncertainty comes from two sources:
 \toprule
  & PQ & SQ & RQ \\
 \midrule
-Final pipeline, OOF & \textbf{0.422} [0.412, 0.431] & 0.674 & 0.626 \\
-\quad per fold, mean $\pm$ s.d. & 0.422 $\pm$ 0.012 & & \\
-\quad 296 multi-annotator images & 0.423 & 0.671 & 0.630 \\
+Final (tree), OOF & \textbf{0.427} [0.417, 0.436] & 0.675 & 0.632 \\
+\quad per fold, mean $\pm$ s.d. & 0.427 $\pm$ 0.010 & & \\
+\quad 296 multi-annotator images & 0.428 & 0.672 & 0.636 \\
 Annotator vs.\ annotator (same 296) & 0.340 & 0.634 & 0.536 \\
 \midrule
-1024~px, 2 views, hand rule, OOF & 0.409 [0.399, 0.418] & 0.666 & 0.614 \\
+1024~px, 2 views, hand rule & 0.409 [0.399, 0.418] & 0.666 & 0.614 \\
 \quad + 4 views & 0.412 & 0.667 & 0.617 \\
 \quad + component scorer & 0.417 & 0.668 & 0.624 \\
 1536~px, 4 views, hand rule & 0.417 & 0.671 & 0.621 \\
-Gain over 1024~px rule (paired) & +0.013 [0.008, 0.018] & & \\
+\quad + scorer, one threshold & 0.422 [0.412, 0.431] & 0.674 & 0.626 \\
+\quad + tree (6 levels), hurdle & 0.426 & 0.676 & 0.630 \\
+\quad + 12 levels, spread (final) & 0.427 & 0.675 & 0.632 \\
+Gain over one threshold (paired) & +0.005 [0.001, 0.008] & & \\
+Gain over 1024~px rule (paired) & +0.018 [0.013, 0.023] & & \\
 \midrule
-Public leaderboard, final pipeline & 0.35 & -- & -- \\
-Public leaderboard, 1024~px rule & 0.35 & -- & -- \\
+Public LB, one threshold & 0.35 & -- & -- \\
+Public LB, 1024~px rule & 0.35 & -- & -- \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The final pipeline improves on the previous one on all five folds (per fold: +0.017, +0.007, +0.013, +0.012, +0.018), and the paired bootstrap interval of the gain excludes zero. Its components contribute unequally: tuned per fold, 1536~px beats 1024~px on four of five folds (+0.009, $-0.002$, +0.009, +0.005, +0.007), and 2048~px matches 1536~px on the two folds tried. The scorer beats the submitted hand rule (confidence $\geq 0.8$) on every fold, by 0.002--0.009, but the best pooled hand rule (confidence $\geq 0.85$, PQ 0.420) by only 0.002. The two leaderboard scores are equal at the two decimals shown: scaled to the 90 or so public images, the bootstrap interval of a single pipeline is about $\pm$0.027, twice the gain. Local OOF ran 0.06--0.07 above the public leaderboard for every submission.
+The gains accumulate in steps that each hold up in a paired bootstrap. Resolution and views: tuned per fold, 1536~px beats 1024~px on four of five folds (+0.009, $-0.002$, +0.009, +0.005, +0.007), and 2048~px matches 1536~px on the two folds tried. Scoring: with a single threshold the scorer beats the submitted hand rule (confidence $\geq 0.8$) on every fold, by 0.002--0.009, but the best pooled hand rule (confidence $\geq 0.85$, PQ 0.420) by only 0.002. Tree: candidates from six thresholds with the hurdle model and the context features give +0.004 [0.001, 0.008]; twelve thresholds alone add nothing (0.425), and the view-spread features bring the gain to +0.005 [0.001, 0.008] over the single threshold, on four of five folds (per fold 0.434, 0.425, 0.411, 0.430, 0.434 against 0.432, 0.415, 0.407, 0.421, 0.435). Against the 1024~px rule the final pipeline gains +0.018 [0.013, 0.023], on every fold. Leaderboard scores are equal at the two decimals shown: scaled to the 90 or so public images, the bootstrap interval of a single pipeline is about $\pm$0.027, larger than any of these gains. Local OOF ran 0.06--0.07 above the public leaderboard for every submission, a gap other entrants report too.
 
-Fig.~\ref{fig:dist} shows the three evaluation plots requested by the organisers on the OOF predictions. Over GT/prediction pairs with IoU~$>0$, the mean IoU is 0.573 and the mean Dice 0.707 (0.553 and 0.688 for the 1024~px rule pipeline). 3.4\% of predicted filaments overlap more than one annotation (merges) and 3.7\% of annotations overlap more than one prediction (splits); 11.7\% of predictions overlap no annotation of their entry and 23.3\% of annotations overlap no prediction. Compared with the hand rule, the scorer removes a quarter of the false positives at the cost of more missed annotations, mostly filaments few annotators agree on. Fig.~\ref{fig:qual} shows typical images.
+Fig.~\ref{fig:dist} shows the three evaluation plots requested by the organisers on the OOF predictions. Over GT/prediction pairs with IoU~$>0$, the mean IoU is 0.575 and the mean Dice 0.708 (0.553 and 0.688 for the 1024~px rule pipeline). 3.1\% of predicted filaments overlap more than one annotation (merges) and 3.8\% of annotations overlap more than one prediction (splits); 10.6\% of predictions overlap no annotation of their entry and 22.7\% of annotations overlap no prediction. Compared with the hand rule, learned selection removes about a quarter of the false positives; the tree then recovers some of the annotations a single threshold misses or merges. Fig.~\ref{fig:qual} shows typical images.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.49\linewidth]{oof1536_iou.png}\hfill
-\includegraphics[width=0.49\linewidth]{oof1536_dice.png}\\[2pt]
-\includegraphics[width=0.9\linewidth]{oof1536_m2n.png}
+\includegraphics[width=0.49\linewidth]{ooftree_iou.png}\hfill
+\includegraphics[width=0.49\linewidth]{ooftree_dice.png}\\[2pt]
+\includegraphics[width=0.9\linewidth]{ooftree_m2n.png}
 \caption{Out-of-fold IoU and Dice distributions over GT/prediction pairs with IoU $>0$, and the one-to-many / many-to-one counts (left: number of GT linked to each prediction; right: number of predictions linked to each GT).}
 \label{fig:dist}
 \end{figure}
@@ -205,14 +209,14 @@ Masks dilated / eroded by 1~px & 0.381 / 0.399 \\
 \end{table}
 
 \subsection{Where the remaining PQ is lost}\label{sec:loss}
-\emph{Near misses.} Of the 3{,}174 OOF false negatives, 45\% overlap no prediction, 18\% overlap one at IoU $<0.3$ and 37\% at IoU 0.3--0.5. Among the near misses the prediction is smaller than the GT in 46\% of cases and larger in 34\%; only 17\% are merges with another filament and 16\% splits. Dilating or eroding every mask by one pixel costs 0.01--0.03 PQ, because filaments are only a few pixels wide: the extent errors are per instance, not a bias a rule could correct.
+\emph{Near misses.} This analysis uses the 1024~px rule pipeline. Of its 3{,}174 OOF false negatives, 45\% overlap no prediction, 18\% overlap one at IoU $<0.3$ and 37\% at IoU 0.3--0.5. Among the near misses the prediction is smaller than the GT in 46\% of cases and larger in 34\%; only 17\% are merges with another filament and 16\% splits. Dilating or eroding every mask by one pixel costs 0.01--0.03 PQ, because filaments are only a few pixels wide: the extent errors are per instance, not a bias a rule could correct.
 \emph{Small filaments.} Recall falls to 0.36 below 500~px. Annotators rarely agree on them: the share of other annotators marking the same filament (IoU $>0.5$) is 0.28 below 300~px and about 0.60 above 1{,}000~px.
 \emph{When a doubtful prediction pays.} A prediction matching $k$ of $n$ annotators raises PQ only if $k/n > \mathrm{PQ}/(2\,\mathrm{SQ}) \approx 0.31$. A filament marked by one annotator of three is break-even, which is why lowering the area or confidence thresholds never helped; 28\% of our false positives match another annotator's filament on the same image.
 
 \subsection{Strengths, weaknesses and possible improvements}
-\emph{Strengths.} One network and a small tree model, no external data, 4.5~s per image, and a submission reproduced byte for byte by the notebook. Out of fold it exceeds a single annotator on both boundary quality (SQ) and detection (RQ): trained on the consensus, it predicts the filaments most annotators agree on. The scorer optimises the metric directly and needs no hand-tuned thresholds.
-\emph{Weaknesses.} Missed annotations are now the largest error (23\% of annotations overlap no prediction), mostly small filaments and filaments marked by one annotator; extent errors of one or two pixels on thin filaments cost SQ; and the gain over the previous pipeline is small relative to the leaderboard's resolution.
-\emph{Improvements.} Since most of the remaining loss is disagreement between annotators, further gains should come from modelling the annotators (for example a head per annotator, or predicting each annotator's style) rather than from a stronger segmenter; a second-stage scorer could also be given image context beyond the two image-level features.
+\emph{Strengths.} One network and two small tree models, no external data, 8.6~s per image, and a submission reproduced byte for byte by the notebook. Out of fold it exceeds a single annotator on both boundary quality (SQ) and detection (RQ): trained on the consensus, it predicts the filaments most annotators agree on. Selection optimises the metric directly: the scorer estimates each candidate's expected contribution, the tree lets it choose the threshold per filament, and the exact antichain keeps the masks disjoint without hand-tuned rules.
+\emph{Weaknesses.} Missed annotations are the largest error (23\% of annotations overlap no prediction), mostly small filaments and filaments marked by one annotator; extent errors of one or two pixels on thin filaments cost SQ; and every gain since the 1024~px rule is below the resolution of the public leaderboard, so the choice rests on the paired out-of-fold comparisons.
+\emph{Improvements.} Most of the remaining loss is disagreement between annotators, which no segmenter removes. Within reach are more diverse members for the probability map (other encoders and decoders, whose disagreement would also sharpen the spread features) and a refiner that re-segments each selected filament at native resolution in a crop aligned with its axis.
 
 
 % ==================================== %

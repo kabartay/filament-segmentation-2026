@@ -120,6 +120,30 @@ def predict(model: torch.nn.Module, images: np.ndarray, device: str, tta: bool =
     return out
 
 
+
+@torch.no_grad()
+def predict_with_spread(model: torch.nn.Module, images: np.ndarray, device: str) -> tuple[np.ndarray, np.ndarray]:
+    """Mean and per-pixel std of the four flipped views, both (N, R, R) float16.
+
+    The mean is computed exactly as ``predict(..., views=4)`` (same order of summation on the device), so the
+    candidates are unchanged; the std (population, over the four views) is the uncertainty feature used by
+    ``filseg.tree``, computed as in scripts/experiments/oof_view_spread.py.
+    """
+    model.eval()
+    mean = np.empty(images.shape, dtype=np.float16)
+    spread = np.empty(images.shape, dtype=np.float16)
+    for k in range(len(images)):
+        x = torch.from_numpy(normalise(np.array(images[k])))[None, None].to(device)
+        p = torch.zeros_like(x)
+        views = []
+        for dims in FLIP_VIEWS[4]:
+            v = torch.sigmoid(model(x.flip(dims))).flip(dims) if dims else torch.sigmoid(model(x))
+            p += v
+            views.append(v)
+        mean[k] = (p / 4)[0, 0].float().cpu().numpy()
+        spread[k] = torch.cat(views)[:, 0].float().cpu().numpy().std(axis=0)
+    return mean, spread
+
 def score_probs(probs: np.ndarray, stems: list[str], groups: dict, cfg: PostConfig) -> PQCounts:
     total = PQCounts()
     for prob, stem in zip(probs, stems):

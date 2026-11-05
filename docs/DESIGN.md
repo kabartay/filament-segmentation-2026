@@ -26,24 +26,34 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 | Instances per image (median) | 7 | |
 | Instance area, 5th-95th percentile | 316 to 6963 px | Sets the range for the minimum-area filter |
 
-## 3. Pipeline (current)
+## 3. Pipeline (current, submission 6 candidate, 2026-11-05)
 
-1. **Cache** (`filseg/cache.py`): images area-downsampled to 1024 px; target = fraction
+1. **Cache** (`filseg/cache.py`): images area-downsampled to 1536 px; target = fraction
    of annotators marking each pixel, computed at 2048 then downsampled.
 2. **Model** (`filseg/train.py`): `smp.Unet` with ImageNet ResNet-34, 1 input channel,
    BCE + soft Dice on the soft target, AdamW 5e-4 with warm-up and cosine decay,
    batch 4, 40 epochs, flips, 90-degree rotations, +-30 deg affine, brightness/gamma.
+   Final model on all 707 images (`weights/unet_r34_1536_all.pt`).
 3. **Folds**: 5-fold `GroupKFold` grouped by calendar month (filaments persist for days,
    so same-week images would leak).
-4. **Post-processing** (`filseg/postprocess.py`): flip-TTA probability, bilinear upsample to
-   2048, threshold, optional closing used only for grouping, 8-connected components,
-   minimum area, limb filter on centroid longitude using a per-image disk fit (Hough circle on
-   the limb since 2026-11-04; before that a bright-pixel fit that ran large).
-5. **Tuning** (`filseg/tune.py`): grid over threshold, closing, minimum area and longitude
-   cut-off, scored by the exact PQ on validation probabilities.
-6. **Submission** (`filseg/predict.py`): averages one or more checkpoints, applies the tuned
-   setting, writes and validates the CSV (unique ids, known stems, non-empty 2048 masks),
-   records runtime per image.
+4. **Inference** (`filseg.train.predict_with_spread`): four flipped views; mean = probability map
+   (identical to `predict(views=4)`), per-pixel std = view spread; both upsampled to 2048.
+5. **Candidate tree** (`filseg/tree.py`): components at 12 thresholds 0.25-0.80 (closing 31 px for
+   grouping only, >= 100 px), nested into a forest; 32 features per node (the 20 of `filseg/scorer.py`,
+   level, tree context, view spread).
+6. **Selection**: hurdle scorer P(match) x E[IoU | match] (`weights/tree_scorer_1536.pkl`, fitted on the
+   72,712 out-of-fold nodes, rows weighted by annotator count); exact antichain maximising sum(score - 0.26).
+   Disjoint by construction (checked on the submission: 0 overlapping pairs).
+7. **Submission** (`filseg/predict.py --tree-scorer`): writes and validates the CSV (unique ids, known
+   stems, non-empty 2048 masks), records runtime per image. `pipeline.ipynb` reproduces it.
+
+Out of fold: PQ 0.4267 [0.417, 0.436]; +0.0049 [0.0012, 0.0085] over submission 5 (single threshold +
+scorer, 0.4219) and +0.0182 [0.0134, 0.0233] over submission 4 (1024 px hand rule, 0.4086); per fold
+0.434 / 0.425 / 0.411 / 0.430 / 0.434 (mean 0.427 +- 0.010). Multi-annotator images 0.4275 (SQ 0.672,
+RQ 0.636). Mean IoU 0.575, mean Dice 0.708; merges 3.1%, splits 3.8%, predictions overlapping nothing
+10.6%, annotations overlapping nothing 22.7%. Test submission `submissions/sub6_r34_1536_tree_spread.csv`:
+1,067 filaments on 177 of 180 images, 8.6 s per image on the M3 Max (shared, loaded machine). View spread on
+MPS vs the HF (CUDA) OOF maps: max per-pixel difference 0.008, mean spread about 0.0002-0.0004.
 
 ## 4. Plan
 
@@ -365,6 +375,17 @@ the one with a public score near 0.70.
   the first is a pattern and code was not downloaded). Local check on CPU: the mean of the four views matches
   val_probs_v4.npy to 0.0002. Used as uncertainty features of tree nodes (spread_mean, spread_q90, spread_max,
   spread_rel).
+
+- **12-level tree with view-spread features (2026-11-05, runs/oof_tree12s_1536_v4.pkl)**: levels 0.25-0.80 in steps
+  of 0.05, 72,712 nodes, build 59 min (4 workers, shared machine), context features on, paired bootstrap against
+  the submitted pipeline (0.4219). Without spread features (ablation `--drop spread`): hurdle best 0.4252 (tau
+  0.26, +0.0034 [-0.0005, +0.0070]), so twelve levels add nothing over six (0.4260). With spread features
+  (spread_mean, spread_q90, spread_max, spread_rel): hurdle 0.4265 / 0.4267 / 0.4269 at tau 0.24 / 0.26 / 0.28,
+  gain +0.0046 / +0.0049 / +0.0051, 95% interval about [+0.001, +0.009], p(gain <= 0) 0.003-0.006; per fold at
+  tau 0.26: 0.434 / 0.425 / 0.411 / 0.430 / 0.434 vs 0.432 / 0.415 / 0.407 / 0.421 / 0.435 (4 of 5 better).
+  Weighted regressor with spread: 0.4245 (worse than hurdle). Decision: adopt the hurdle scorer + context +
+  spread on the tree, tau 0.26 (middle of the plateau), as the next pipeline candidate; view spread is free at
+  test time because inference already computes the four views.
 
 ### Public notebook survey (2026-11-05)
 
