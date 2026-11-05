@@ -1,0 +1,24 @@
+{
+ "runs": null,
+ "post": "scorer tau 0.2 on runs/oof_components_1536_v4.pkl",
+ "entries": 1154,
+ "pq": 0.4219,
+ "summary": "PQ=0.4219 SQ=0.6736 TP=4828 FP=2392 FN=3371",
+ "pairs_iou_gt0": 6637,
+ "mean_iou": 0.5734,
+ "mean_dice": 0.7065,
+ "gt_degree": {
+  "0": 1911,
+  "1": 5981,
+  "2": 267,
+  "3": 38,
+  "4": 2
+ },
+ "pred_degree": {
+  "0": 847,
+  "1": 6127,
+  "2": 226,
+  "3": 18,
+  "4": 1
+ }
+}

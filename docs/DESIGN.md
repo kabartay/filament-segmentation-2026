@@ -50,7 +50,7 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 | Step | What | Status |
 |---|---|---|
 | 1 | U-Net baseline, fold 0, tuned post-processing | done: val PQ 0.389 (epoch 10), 0.396 (epoch 20), 0.415 (full 40 epochs, run unet_r34full_f0); stopped by mistake at epoch 22 of 40 while still improving (default-setting val PQ: e5 0.308, e10 0.357, e15 0.355, e20 0.379); best.pt is e20; re-run the full schedule later |
-| 2 | First submission, to calibrate local PQ against LB | done: LB 0.32 public (local 0.389); submission 2 (40-epoch U-Net) LB 0.35 public (local 0.415); submission 3 (5-fold average) 0.35; submission 4 (all data) 0.35; empty-mask probe 0.00 |
+| 2 | First submission, to calibrate local PQ against LB | done: LB 0.32 public (local 0.389); submission 2 (40-epoch U-Net) LB 0.35 public (local 0.415); submission 3 (5-fold average) 0.35; submission 4 (all data) 0.35; empty-mask probe 0.00; submission 5 (1536 px, 4 flips, scorer; OOF 0.422) 0.35 |
 | 3 | Per-filament crop refiner at native 2048 px (crop 3x the box, second channel marking the target box, 256 px input; after Reche & Cid 2026 and the nomannic19 notebook) | done, fold 0: crop Dice 0.829 (15 epochs, about 1.6 min/epoch); lifts U-Net val PQ 0.389 to 0.402 at threshold 0.6; no gain on the 40-epoch U-Net (0.415 to 0.413), not used |
 | 4 | Mask R-CNN detector (torchvision, BSD) for learned instance grouping | done, fold 0, 12 epochs (SGD lr 0.005, batch 2, about 6 min/epoch): val PQ 0.377 with disjoint masks, below the U-Net; as a source of extra filaments it lifts the epoch-10 U-Net to 0.399 but the 40-epoch U-Net only 0.415 to 0.417; not used |
 | 5 | Model variants, fold 0, 40 epochs each, one at a time: (a) ResNet-50 encoder; (b) limb-darkening correction (`filseg/flatten.py`); later stronger gamma/zoom augmentation, DeepLabV3+ (ASPP) decoder | (a) done: tuned 0.4139 vs 0.4160 for ResNet-34, and averaging both gives 0.4159, so no gain; (b) done: tuned 0.4112 vs 0.4160, no gain; (c) Lovasz hinge loss: tuned 0.3901, failed |
@@ -302,6 +302,12 @@ Each entry: what we tried, the result, and what we decided.
   no overlapping masks; 6.4 s/image on MPS including features. 5-fold OOF of this pipeline 0.4220 vs 0.4086.
   The scorer is saved as a plain dict (a pickled class from `python -m filseg.scorer` resolved to `__main__` and
   failed to load).
+  Uploaded 2026-11-05: **public LB 0.35**, the same as submissions 2-4 at the two decimals the LB shows. With about
+  90 public images (per-fold PQ spread about 0.01 at 141 images) a +0.013 OOF gain cannot be resolved there; the
+  choice rests on the 5-fold OOF, where the pipeline wins on every fold. OOF evaluation figures for it:
+  `docs/figures/oof1536_*` (PQ 0.4219, SQ 0.674, mean IoU 0.573, mean Dice 0.707 over pairs with IoU > 0; GT
+  degree {0: 1911, 1: 5981, 2: 267, 3: 38, 4: 2}, prediction degree {0: 847, 1: 6127, 2: 226, 3: 18, 4: 1}; against
+  the 1024 px rule pipeline: fewer false positives, splits and merges, more missed GT).
 - **HF Jobs for training (2026-11-04, `scripts/hf/`)**: code and an image cache go to a private HF dataset repo
   (`launch.py upload`, which refuses a public repo, since the competition data is not ours to share); `launch.py run`
   starts `job.sh` on a GPU flavour with a timeout; each job uploads its run folder, `launch.py fetch` pulls it.

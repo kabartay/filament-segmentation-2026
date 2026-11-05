@@ -7,12 +7,15 @@ notebook's definitions on our own predictions, so the report figures match what 
 organisers will compute on the test set.
 
 Run: ``.venv/bin/python -m filseg.report --run unet_r34full_f0 --post runs/unet_r34full_f0/post.json``
+or, for the component-scorer pipeline, from cached OOF candidates with a cross-validated scorer:
+``.venv/bin/python -m filseg.report --components runs/oof_components_1536_v4.pkl --tau 0.20 --name oof1536``
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import pickle
 from collections import Counter
 from pathlib import Path
 
@@ -28,6 +31,7 @@ from filseg.geometry import fit_disk
 from filseg.metric import PQCounts, iou_matrix
 from filseg.postprocess import instances
 from filseg.predict import load_post
+from filseg.scorer import make_regressor, training_table
 from filseg.train import RUNS
 
 FIGURES = ROOT / "docs" / "figures"
@@ -50,6 +54,25 @@ def collect(runs: list[str], post: Path) -> tuple[list[np.ndarray], PQCounts]:
                 iou = iou_matrix(entry.rles, pred)
                 total.add(iou, len(entry.rles), len(pred))
                 matrices.append(iou)
+    return matrices, total
+
+
+def collect_scored(components: Path, tau: float) -> tuple[list[np.ndarray], PQCounts]:
+    """As ``collect``, for the scorer pipeline: candidates kept by a scorer trained on the other four folds."""
+    data = pickle.load(open(components, "rb"))
+    _, X, y, fold = training_table(data)
+    score = np.zeros_like(y)
+    for f in np.unique(fold):
+        score[fold == f] = make_regressor().fit(X[fold != f], y[fold != f]).predict(X[fold == f])
+    matrices, total, start = [], PQCounts(), 0
+    for d in data:
+        n = len(d["feats"])
+        kept = np.nonzero(score[start:start + n] > tau)[0]
+        start += n
+        for n_gt, iou in d["entries"]:
+            iou = iou[:, kept] if iou.shape[1] else iou
+            total.add(iou, n_gt, len(kept))
+            matrices.append(iou)
     return matrices, total
 
 
@@ -104,12 +127,17 @@ def many_to_one(gt: Counter, pred: Counter, path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run", nargs="+", required=True, help="one run, or one per fold to pool")
-    parser.add_argument("--post", type=Path, required=True, help="post.json or tune.json to apply")
+    parser.add_argument("--run", nargs="+", help="one run, or one per fold to pool")
+    parser.add_argument("--post", type=Path, help="post.json or tune.json to apply")
+    parser.add_argument("--components", type=Path, help="cached OOF candidates (scorer pipeline) instead of --run")
+    parser.add_argument("--tau", type=float, default=0.20)
     parser.add_argument("--name", default="oof")
     args = parser.parse_args()
 
-    matrices, total = collect(args.run, args.post)
+    if args.components:
+        matrices, total = collect_scored(args.components, args.tau)
+    else:
+        matrices, total = collect(args.run, args.post)
     pairs = np.concatenate([m.ravel() for m in matrices if m.size])
     iou = pairs[pairs > 0]
     dice = 2 * iou / (1 + iou)
@@ -119,7 +147,7 @@ def main() -> None:
     distribution(iou, "IoU distribution", "IoU", FIGURES / f"{args.name}_iou.png")
     distribution(dice, "Dice distribution", "Dice", FIGURES / f"{args.name}_dice.png")
     many_to_one(gt, pred, FIGURES / f"{args.name}_m2n.png")
-    stats = {"runs": args.run, "post": str(args.post), "entries": len(matrices), "pq": round(total.score(), 4),
+    stats = {"runs": args.run, "post": str(args.post) if args.post else f"scorer tau {args.tau} on {args.components}", "entries": len(matrices), "pq": round(total.score(), 4),
              "summary": total.summary(), "pairs_iou_gt0": int(iou.size),
              "mean_iou": round(float(iou.mean()), 4), "mean_dice": round(float(dice.mean()), 4),
              "gt_degree": dict(sorted(gt.items())), "pred_degree": dict(sorted(pred.items()))}
