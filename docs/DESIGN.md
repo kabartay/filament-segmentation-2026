@@ -52,7 +52,7 @@ scorer, 0.4219) and +0.0182 [0.0134, 0.0233] over submission 4 (1024 px hand rul
 0.434 / 0.425 / 0.411 / 0.430 / 0.434 (mean 0.427 +- 0.010). Multi-annotator images 0.4275 (SQ 0.672,
 RQ 0.636). Mean IoU 0.575, mean Dice 0.708; merges 3.1%, splits 3.8%, predictions overlapping nothing
 10.6%, annotations overlapping nothing 22.7%. Test submission `submissions/sub6_r34_1536_tree_spread.csv`:
-1,067 filaments on 177 of 180 images, 8.6 s per image on the M3 Max (shared, loaded machine). View spread on
+1,067 filaments on 177 of 180 images, public LB 0.36 (2026-11-05; sub4/sub5 0.35), 8.6 s per image on the M3 Max (shared, loaded machine). View spread on
 MPS vs the HF (CUDA) OOF maps: max per-pixel difference 0.008, mean spread about 0.0002-0.0004.
 
 ## 4. Plan

@@ -9,8 +9,8 @@ instance selection: candidates at twelve thresholds form a tree, a gradient-boos
 candidate's expected PQ contribution, and the best disjoint set is chosen exactly on the tree. Out-of-fold PQ
 0.427 (95% bootstrap interval 0.417-0.436) on all 707 training images (5-fold split by calendar month; mean IoU
 0.575, mean Dice 0.708 over matched pairs), against 0.422 with a single threshold and 0.409 for the 1024 px
-hand-rule pipeline; public leaderboard PQ 0.35 for both earlier pipelines (two decimals over about 90 images
-cannot resolve these gains). For scale, one human annotator scored against another on the same images gives
+hand-rule pipeline; public leaderboard PQ 0.36, against 0.35 for both earlier pipelines (two decimals over
+about 90 images cannot resolve these gains). For scale, one human annotator scored against another on the same images gives
 PQ 0.340.
 
 ## Reproduce the submitted predictions
