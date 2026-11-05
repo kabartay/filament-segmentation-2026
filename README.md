@@ -75,3 +75,12 @@ One 1536 px fold takes about 40 min on an A100 or about 3 h on an M3 Max.
 
 Only the competition's training images and annotations are used. Filament spines and chirality labels
 are not used, and no external filament masks are used.
+
+## Report
+
+`report/report.tex` is the technical report (IEEEtran conference format, 4 pages) and `report/report.pdf` its
+local build (`tectonic -X compile report/report.tex`; figures come from `docs/figures/`).
+
+## Licence
+
+The code is released under the MIT licence (`LICENSE`). The competition data is not part of this repository.

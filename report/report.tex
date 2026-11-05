@@ -14,7 +14,7 @@
 \title{A Consensus-Trained U-Net with a Learned Component Scorer for Solar Filament Instance Segmentation,\\and What Limits Panoptic Quality on MAGFiLO}
 
 \author{\IEEEauthorblockN{Mukharbek Organokov}
-\IEEEauthorblockA{[affiliation] \\ [e-mail]}}
+\IEEEauthorblockA{Independent researcher \\ mukharbek.organokov@gmail.com}}
 
 \maketitle
 
@@ -36,7 +36,7 @@ disagreement rather than model error.
 Filaments are dense, cool plasma suspended above polarity inversion lines; they appear as dark, elongated
 structures in H-alpha and are at the origin of many eruptions. MAGFiLO~\cite{magfilo} provides manual
 segmentations of filaments on GONG H-alpha images, with up to three independent annotators per image.
-The challenge asks for one mask per filament and scores them with PQ~\cite{kirillov2019}.
+The challenge~\cite{challenge} asks for one mask per filament and scores them with PQ~\cite{kirillov2019}.
 
 The data has a property that shapes every decision: annotators disagree strongly, and each annotator is
 scored separately against the same prediction. A prediction can therefore never match all annotators,
@@ -109,18 +109,19 @@ against every other annotator of the same image (296 images with two or three an
 \centering
 \caption{Main results. OOF: out of fold, 707 images, 1{,}154 entries.}
 \label{tab:main}
-\begin{tabular}{lccc}
+\small\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccc@{}}
 \toprule
  & PQ & SQ & RQ \\
 \midrule
-Final pipeline, OOF (all images) & \textbf{0.422} & 0.674 & 0.626 \\
-Final pipeline, OOF (296 multi-annotator images) & 0.423 & 0.671 & 0.630 \\
-Annotator vs.\ annotator (same 296 images) & 0.340 & 0.634 & 0.536 \\
+Final pipeline, OOF (all 707 images) & \textbf{0.422} & 0.674 & 0.626 \\
+Final, OOF (296 multi-annotator images) & 0.423 & 0.671 & 0.630 \\
+Annotator vs.\ annotator (same images) & 0.340 & 0.634 & 0.536 \\
 \midrule
-1024~px, 2 views, hand rule, OOF & 0.409 & 0.666 & 0.614 \\
+1024~px, 2 views, hand rule & 0.409 & 0.666 & 0.614 \\
 \quad + 4 views & 0.412 & 0.667 & 0.617 \\
 \quad + component scorer & 0.417 & 0.668 & 0.624 \\
-1536~px, 4 views, hand rule, OOF & 0.417 & 0.671 & 0.621 \\
+1536~px, 4 views, hand rule & 0.417 & 0.671 & 0.621 \\
 \midrule
 Public leaderboard, final pipeline & 0.35 & -- & -- \\
 Public leaderboard, 1024~px rule & 0.35 & -- & -- \\
@@ -168,7 +169,8 @@ Table~\ref{tab:abl} lists the variants we tried, each evaluated with its own tun
 \centering
 \caption{Variants (fold 0, 142 images, tuned PQ) and post-processing rules (5-fold OOF, 707 images).}
 \label{tab:abl}
-\begin{tabular}{lc}
+\small
+\begin{tabular}{@{}p{0.66\linewidth}r@{}}
 \toprule
 Variant (fold 0) & PQ \\
 \midrule
@@ -189,8 +191,8 @@ Confidence $\geq 0.85$ (reference for the rows below) & 0.411 \\
 No closing, no confidence or limb filter & 0.398 \\
 Size-dependent confidence threshold & 0.411 \\
 Hysteresis (seed and grow thresholds) & 0.409 \\
-8 dihedral views instead of 4 (fold 0) & 0.419 vs.\ 0.419 \\
-2048~px input (folds 0, 3; default setting) & 0.404, 0.388 vs.\ 0.403, 0.387 \\
+8 dihedral views (fold 0; 4 flips: 0.419) & 0.419 \\
+2048~px, folds 0 / 3 (1536~px: 0.403 / 0.387) & 0.404 / 0.388 \\
 Masks dilated / eroded by 1~px & 0.381 / 0.399 \\
 70-degree limb cut-off & no change \\
 \bottomrule
@@ -238,7 +240,16 @@ annotators (e.g.\ predicting each annotator's style) rather than from a stronger
 and a notebook reproducing the submission are in the repository; every experiment is logged in
 \texttt{docs/DESIGN.md}.
 
-\begin{thebibliography}{9}
+\section*{Acknowledgment}
+This work utilizes GONG data obtained by the NSO Integrated Synoptic Program, managed by the National Solar
+Observatory, which is operated by the Association of Universities for Research in Astronomy (AURA), Inc.\ under
+a cooperative agreement with the National Science Foundation and with contribution from the National Oceanic
+and Atmospheric Administration. The GONG network of instruments is hosted by the Big Bear Solar Observatory,
+High Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de
+Astrof\'isica de Canarias, and Cerro Tololo Interamerican Observatory.
+
+\begin{thebibliography}{10}
+\bibitem{challenge} A.~Ahmadzadeh, D.~J.~Kempton, Q.~Li, A.~A.~Pevtsov, ``Solar Filament Segmentation Challenge 2026,'' Kaggle, 2026, \url{https://www.kaggle.com/competitions/filament-segmentation-2026}.
 \bibitem{magfilo} A.~Ahmadzadeh \emph{et al.}, ``A dataset of manually annotated filaments from H-alpha observations,'' \emph{Scientific Data}, 2024, doi:10.1038/s41597-024-03876-y.
 \bibitem{kirillov2019} A.~Kirillov, K.~He, R.~Girshick, C.~Rother, P.~Doll\'ar, ``Panoptic segmentation,'' in \emph{CVPR}, 2019.
 \bibitem{unet} O.~Ronneberger, P.~Fischer, T.~Brox, ``U-Net: convolutional networks for biomedical image segmentation,'' in \emph{MICCAI}, 2015.
@@ -246,7 +257,7 @@ and a notebook reproducing the submission are in the repository; every experimen
 \bibitem{smp} P.~Iakubovskii, ``Segmentation Models Pytorch,'' GitHub repository, 2019.
 \bibitem{maskrcnn} K.~He, G.~Gkioxari, P.~Doll\'ar, R.~Girshick, ``Mask R-CNN,'' in \emph{ICCV}, 2017.
 \bibitem{lovasz} M.~Berman, A.~Rannen Triki, M.~B.~Blaschko, ``The Lov\'asz-softmax loss,'' in \emph{CVPR}, 2018.
-\bibitem{reche2026} Reche and Cid, \emph{Acta Astronautica}, vol.~249, 2026.
+\bibitem{reche2026} A.~Reche, C.~Cid, ``New dataset and framework for filament detection, classification, and segmentation using deep learning,'' \emph{Acta Astronautica}, vol.~249, pp.~381--398, 2026, doi:10.1016/j.actaastro.2026.07.010.
 \end{thebibliography}
 
 \end{document}
