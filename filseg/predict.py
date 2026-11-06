@@ -21,6 +21,7 @@ from pycocotools import mask as mask_util
 
 from filseg.cache import CACHE
 from filseg.data import ROOT, SIZE, TEST_IMAGES, read_image
+from filseg.ensemble import pool_views
 from filseg.geometry import fit_disk
 from filseg.postprocess import PostConfig, instances, upsample
 from filseg.scorer import load_scorer
@@ -57,6 +58,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", nargs="+", required=True, help="one or more checkpoints to average")
     parser.add_argument("--encoder", default="resnet34")
+    parser.add_argument("--encoders", nargs="+", default=None,
+                        help="one encoder per --weights entry (default: --encoder for all)")
     parser.add_argument("--post", type=Path, default=None, help="tune.json to take the best setting from")
     parser.add_argument("--name", default="submission")
     parser.add_argument("--images", default="plain", choices=["plain", "flat"])
@@ -74,19 +77,31 @@ def main() -> None:
     scorer = load_scorer(args.scorer) if args.scorer else None
     tree = load_tree_scorer(args.tree_scorer) if args.tree_scorer else None
     if tree is not None:
-        assert len(args.weights) == 1 and args.views == 4, "the tree scorer takes one model and its four views"
+        assert args.views == 4, "the tree scorer takes each model's four views"
+    encoders = args.encoders or [args.encoder] * len(args.weights)
+    assert len(encoders) == len(args.weights), "give one encoder per checkpoint"
     started = time.time()
 
     probs = np.zeros(images.shape, np.float32)
     spread = None
-    for weights in args.weights:
-        model = build_model(args.encoder, pretrained=False).to(device)
+    means, spreads = [], []
+    for weights, encoder in zip(args.weights, encoders):
+        model = build_model(encoder, pretrained=False).to(device)
         model.load_state_dict(torch.load(weights, map_location=device))
         if tree is not None:
             mean, spread = predict_with_spread(model, images, device)
-            probs += mean.astype(np.float32)
+            means.append(mean)
+            spreads.append(spread)
         else:
             probs += predict(model, images, device, views=args.views).astype(np.float32) / len(args.weights)
+
+    if tree is not None and len(means) == 1:  # one model: exactly the maps it predicted (submission 6)
+        probs, spread = means[0].astype(np.float32), spreads[0]
+    elif tree is not None:  # several: mean and spread over all their views (filseg.ensemble)
+        probs = np.empty(images.shape, np.float32)
+        spread = np.empty(images.shape, np.float16)
+        for k in range(len(images)):
+            probs[k], spread[k] = pool_views([m[k] for m in means], [sd[k] for sd in spreads])
 
     rows = []
     plain = np.load(CACHE / "test_images.npy", mmap_mode="r")  # the disk is fitted on the plain image
@@ -113,7 +128,7 @@ def main() -> None:
         selection = {"scorer": str(args.scorer), "tau": scorer.tau}
     else:
         selection = cfg.__dict__
-    meta = {"weights": args.weights, "views": args.views, "post": selection, "rows": len(rows),
+    meta = {"weights": args.weights, "encoders": encoders, "views": args.views, "post": selection, "rows": len(rows),
             "images_with_predictions": with_preds, "images": len(stems),
             "seconds": round(elapsed, 1), "seconds_per_image": round(elapsed / len(stems), 3)}
     out.with_suffix(".json").write_text(json.dumps(meta, indent=1))

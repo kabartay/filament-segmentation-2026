@@ -61,13 +61,13 @@ OUT = RUNS / "oof_tree_1536_v4.pkl"
 G: dict = {}
 
 
-def init(levels: tuple[float, ...], spread: bool) -> None:
+def init(levels: tuple[float, ...], spread: bool, name: str = NAME) -> None:
     G["levels"] = levels
     G["groups"] = group_by_stem(load_train())
     G["index"] = json.loads((CACHE / "index.json").read_text())["train"]
     G["images"] = np.load(CACHE / "train_images.npy", mmap_mode="r")
-    G["probs"] = {f: np.load(RUNS / f"{NAME}_f{f}" / PROBS, mmap_mode="r") for f in range(5)}
-    G["spread"] = ({f: np.load(RUNS / f"{NAME}_f{f}" / "val_spread_v4.npy", mmap_mode="r") for f in range(5)}
+    G["probs"] = {f: np.load(RUNS / f"{name}_f{f}" / PROBS, mmap_mode="r") for f in range(5)}
+    G["spread"] = ({f: np.load(RUNS / f"{name}_f{f}" / "val_spread_v4.npy", mmap_mode="r") for f in range(5)}
                    if spread else None)
 
 
@@ -82,13 +82,14 @@ def work(item: tuple[int, int, str]) -> dict:
     return dict(fold=f, stem=s, feats=feats, level=level, parent=parent, entries=entries)
 
 
-def build(limit: int, workers: int, out: Path, levels: tuple[float, ...] = LEVELS, spread: bool = False) -> None:
+def build(limit: int, workers: int, out: Path, levels: tuple[float, ...] = LEVELS, spread: bool = False,
+          name: str = NAME) -> None:
     items = [(f, i, s) for f in range(5)
-             for i, s in enumerate(json.loads((RUNS / f"{NAME}_f{f}" / "val_stems.json").read_text()))]
+             for i, s in enumerate(json.loads((RUNS / f"{name}_f{f}" / "val_stems.json").read_text()))]
     if limit:
         items = items[:limit]
     t0 = time.time()
-    with ProcessPoolExecutor(workers, initializer=init, initargs=(levels, spread)) as ex:
+    with ProcessPoolExecutor(workers, initializer=init, initargs=(levels, spread, name)) as ex:
         data = list(ex.map(work, items, chunksize=2))
     pickle.dump(data, open(out, "wb"))
     n = sum(len(d["feats"]) for d in data)
@@ -234,13 +235,14 @@ def main() -> None:
     ap.add_argument("--context", action="store_true", help="add tree-context features")
     ap.add_argument("--levels", default=",".join(str(v) for v in LEVELS), help="build: thresholds, increasing")
     ap.add_argument("--spread", action="store_true", help="build: add view-spread features (val_spread_v4.npy)")
+    ap.add_argument("--name", default=NAME, help="build: run name, runs/<name>_f{k} (e.g. an ensemble from filseg.ensemble)")
     ap.add_argument("--drop", default="", help="eval: comma-separated feature-name prefixes to leave out")
     ap.add_argument("--tag", default="", help="eval: suffix for result keys and the output json")
     ap.add_argument("--modes", default="plain,weighted,hurdle")
     ap.add_argument("--taus", default="0.16,0.18,0.20,0.22,0.24,0.26,0.28")
     a = ap.parse_args()
     if a.step == "build":
-        build(a.limit, a.workers, a.out, tuple(float(v) for v in a.levels.split(",")), a.spread)
+        build(a.limit, a.workers, a.out, tuple(float(v) for v in a.levels.split(",")), a.spread, a.name)
     else:
         evaluate(a.out, a.context, tuple(a.modes.split(",")), tuple(float(t) for t in a.taus.split(",")),
                  tuple(x for x in a.drop.split(",") if x), a.tag)
