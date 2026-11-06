@@ -8,7 +8,7 @@ Run: PYTHONPATH=. .venv/bin/python scripts/experiments/oof_probs_views.py --view
 import argparse, json, os, time
 import numpy as np, torch
 from filseg.cache import CACHE
-from filseg.train import RUNS, build_model, fold_split, predict
+from filseg.train import RUNS, build_model, fold_split, predict, run_encoder
 
 ap = argparse.ArgumentParser(); ap.add_argument("--views", type=int, default=4)
 ap.add_argument("--name", default="unet_r34full", help="run name; runs/<name>_f0..f4"); a = ap.parse_args()
@@ -19,7 +19,7 @@ for f in range(5):
     run = RUNS / f"{a.name}_f{f}"; t0 = time.time()
     _, val_idx = fold_split(index, f)
     assert [index[k] for k in val_idx] == json.loads((run / "val_stems.json").read_text())
-    model = build_model("resnet34", pretrained=False).to(device)
+    model = build_model(run_encoder(run), pretrained=False).to(device)
     model.load_state_dict(torch.load(run / "best.pt", map_location=device))
     val = np.stack([np.array(images[k]) for k in val_idx])
     check = predict(model, val[:3], device, views=2).astype(np.float32)

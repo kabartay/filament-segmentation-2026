@@ -90,6 +90,12 @@ def build_model(encoder: str, pretrained: bool = True) -> torch.nn.Module:
                     in_channels=1, classes=1)
 
 
+def run_encoder(run_dir: Path) -> str:
+    """Encoder a run was trained with, from its args.json (runs that predate the flag used ResNet-34)."""
+    path = Path(run_dir) / "args.json"
+    return json.loads(path.read_text()).get("encoder", "resnet34") if path.exists() else "resnet34"
+
+
 def soft_dice_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     prob = torch.sigmoid(logits)
     inter = (prob * target).sum(dim=(1, 2, 3))

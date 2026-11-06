@@ -21,7 +21,7 @@ import numpy as np
 import torch
 
 from filseg.cache import CACHE
-from filseg.train import FLIP_VIEWS, RUNS, build_model, fold_split, normalise
+from filseg.train import FLIP_VIEWS, RUNS, build_model, fold_split, normalise, run_encoder
 
 
 @torch.no_grad()
@@ -50,7 +50,7 @@ def main() -> None:
         assert [index[k] for k in val_idx] == stems
         if a.limit:
             val_idx = val_idx[:a.limit]
-        model = build_model("resnet34", pretrained=False).to(device)
+        model = build_model(run_encoder(run), pretrained=False).to(device)
         model.load_state_dict(torch.load(run / "best.pt", map_location=device))
         model.eval()
         spread = np.empty((len(val_idx),) + images.shape[1:], np.float16)
