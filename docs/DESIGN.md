@@ -339,6 +339,14 @@ Each entry: what we tried, the result, and what we decided.
   final-pipeline example figure (`scripts/experiments/qualitative_final.py`; 50th/75th/90th percentile of image PQ
   among fold-0 images with three annotators and at least five filaments each). Four pages with acknowledgment
   and references; the limit excludes those. The IEEEtran draft `report/report.tex` is removed (in git history).
+- **ConvNeXt-T U-Net, fold 0 (2026-11-06/07, run `unet_cnxt_1536_f0`, `scripts/run_convnext.sh`, MPS)**: encoder
+  `tu-convnext_tiny` (timm via smp, 31.9M parameters vs 24.4M), lr 3e-4, otherwise as ResNet-34 at 1536 px. About
+  1,150 s/epoch on the M3 Max (4.3x ResNet-34), up to 2,800 s when the GPU was shared. Default-setting val PQ
+  e5 0.298, e10 0.358, e15 0.366, e20 0.395, e25 0.389, e30 0.403 (ResNet-34: 0.295, 0.333, 0.369, 0.379, 0.395,
+  0.398). The chain stopped at epoch 31 when the Claude session ended; best.pt is epoch 30. Tuned on fold 0 (2-view
+  maps, `filseg.tune`): ConvNeXt-T 0.4161 (threshold 0.55), ResNet-34 0.4245, average of the two
+  (`filseg.ensemble`) 0.4261, so +0.0016 over ResNet-34 alone, below what one fold resolves. Not continued to
+  folds 1-4 (about 50 GPU hours on the Mac).
 
 ## 6. Reference points from other entrants
 
