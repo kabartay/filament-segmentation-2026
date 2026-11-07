@@ -8,6 +8,7 @@ own ground truth, so this module keeps them apart rather than merging them.
 from __future__ import annotations
 
 import json
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,7 +17,7 @@ import numpy as np
 from pycocotools import mask as mask_util
 
 ROOT = Path(__file__).resolve().parent.parent
-RAW = ROOT / "data" / "raw" / "MAGFiLO_1.0_Kaggle_2026"
+RAW = Path(os.environ["FILSEG_RAW"]) if "FILSEG_RAW" in os.environ else ROOT / "data" / "raw" / "MAGFiLO_1.0_Kaggle_2026"
 TRAIN_IMAGES = RAW / "train" / "train_images"
 TEST_IMAGES = RAW / "test" / "test_images"
 TRAIN_JSON = RAW / "train" / "MAGFiLO_1.0_Annotations_kaggle2026_train.json"

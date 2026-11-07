@@ -167,6 +167,9 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument("--amp", action="store_true", help="float16 autocast on CUDA (ignored elsewhere)")
+    parser.add_argument("--max-minutes", type=float, default=0,
+                        help="stop before an epoch that would end past this wall-clock budget (0 = no limit)")
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--val-every", type=int, default=5)
     parser.add_argument("--loss", default="bce_dice", choices=["bce_dice", "bce_lovasz"],
@@ -205,10 +208,10 @@ def main() -> None:
                         num_workers=args.workers, persistent_workers=args.workers > 0, drop_last=True)
     model = build_model(args.encoder).to(device)
     optimiser = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    total_steps = args.epochs * len(loader)
+    horizon = [args.epochs * len(loader)]  # cosine length in steps; shortened by --max-minutes after epoch 1
     warmup = len(loader)
     schedule = torch.optim.lr_scheduler.LambdaLR(
-        optimiser, lambda s: min(1.0, (s + 1) / warmup) * 0.5 * (1 + math.cos(math.pi * min(1.0, s / total_steps))))
+        optimiser, lambda s: min(1.0, (s + 1) / warmup) * 0.5 * (1 + math.cos(math.pi * min(1.0, s / horizon[0]))))
 
     if args.loss == "bce_lovasz":
         # Lovasz hinge optimises IoU directly; it needs a binary target, so use the majority mask
@@ -216,22 +219,50 @@ def main() -> None:
         second_loss = lambda logits, y: lovasz(logits, (y >= 0.5).float())  # noqa: E731
     else:
         second_loss = soft_dice_loss
+    use_amp = args.amp and device == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    run_started, last_epoch_s = time.time(), 0.0
+    planned = args.epochs
     best = -1.0
     for epoch in range(1, args.epochs + 1):
+        if epoch > planned:
+            break
+        if args.max_minutes and time.time() - run_started + 1.2 * last_epoch_s > 60 * args.max_minutes:
+            emit(f"time budget reached before epoch {epoch}; validating the current model")
+            if val_images is not None:
+                probs = predict(model, val_images, device)
+                counts = score_probs(probs, val_stems, groups, PostConfig())
+                emit(f"  val {counts.summary()}")
+                if counts.score() > best:
+                    best = counts.score()
+                    torch.save(model.state_dict(), run_dir / "best.pt")
+                    np.save(run_dir / "val_probs.npy", probs)
+                    (run_dir / "val_stems.json").write_text(json.dumps(val_stems))
+            break
         model.train()
         started, running = time.time(), 0.0
         for x, y in loader:
             x, y = x.to(device), y.to(device)
-            logits = model(x)
+            with torch.autocast("cuda", dtype=torch.float16, enabled=use_amp):
+                logits = model(x)
+            logits = logits.float()
             loss = F.binary_cross_entropy_with_logits(logits, y) + second_loss(logits, y)
             optimiser.zero_grad(set_to_none=True)
-            loss.backward()
-            optimiser.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimiser)
+            scaler.update()
             schedule.step()
             running += loss.item()
-        emit(f"epoch {epoch} loss={running / len(loader):.4f} {time.time() - started:.0f}s")
+        last_epoch_s = time.time() - started
+        if epoch == 1 and args.max_minutes:  # fit the whole cosine schedule into the budget
+            fit = int((60 * args.max_minutes - (time.time() - run_started)) / (1.1 * last_epoch_s)) + 1
+            if fit < planned:
+                planned = max(fit, 2)
+                horizon[0] = planned * len(loader)
+                emit(f"time budget: {planned} epochs instead of {args.epochs}")
+        emit(f"epoch {epoch} loss={running / len(loader):.4f} {last_epoch_s:.0f}s")
 
-        if val_images is not None and (epoch % args.val_every == 0 or epoch == args.epochs):
+        if val_images is not None and (epoch % args.val_every == 0 or epoch == planned):
             probs = predict(model, val_images, device)
             counts = score_probs(probs, val_stems, groups, PostConfig())
             emit(f"  val {counts.summary()}")

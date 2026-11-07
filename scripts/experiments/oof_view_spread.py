@@ -36,6 +36,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="unet_r34_1536")
     ap.add_argument("--folds", default="0,1,2,3,4")
+    ap.add_argument("--save-mean", action="store_true", help="also save the 4-view mean as val_probs_v4.npy")
     ap.add_argument("--limit", type=int, default=0, help="first N validation images only (smoke test; nothing saved)")
     a = ap.parse_args()
     device = os.environ.get("FILSEG_DEVICE", "cuda" if torch.cuda.is_available()
@@ -54,14 +55,19 @@ def main() -> None:
         model.load_state_dict(torch.load(run / "best.pt", map_location=device))
         model.eval()
         spread = np.empty((len(val_idx),) + images.shape[1:], np.float16)
+        mean = np.empty_like(spread) if a.save_mean else None
         mean_check = []
         for j, k in enumerate(val_idx):
             v = view_probs(model, images[k], device)
             spread[j] = v.std(axis=0)
+            if mean is not None:
+                mean[j] = v.mean(axis=0)
             if j < 3:
                 mean_check.append(v.mean(axis=0))
         if not a.limit:
             np.save(run / "val_spread_v4.npy", spread)
+            if mean is not None:
+                np.save(run / "val_probs_v4.npy", mean)
         if (run / "val_probs_v4.npy").exists():  # same model and views: the mean must match the saved 4-view map
             saved = np.load(run / "val_probs_v4.npy", mmap_mode="r")[:len(mean_check)].astype(np.float32)
             print(f"fold {f}: 4-view mean vs saved max |diff| {np.abs(np.stack(mean_check) - saved).max():.4f}")

@@ -1,0 +1,1 @@
+{"name": "unet_cnxt_1536", "encoder": "tu-convnext_tiny", "lr": 3e-4, "epochs": 40, "chains": [[1, 3], [2, 4]]}
