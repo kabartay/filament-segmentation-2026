@@ -347,6 +347,21 @@ Each entry: what we tried, the result, and what we decided.
   maps, `filseg.tune`): ConvNeXt-T 0.4161 (threshold 0.55), ResNet-34 0.4245, average of the two
   (`filseg.ensemble`) 0.4261, so +0.0016 over ResNet-34 alone, below what one fold resolves. Not continued to
   folds 1-4 (about 50 GPU hours on the Mac).
+- **Kaggle GPU not used (2026-11-07)**: the training kernel (`scripts/kaggle/`) and the private code dataset are
+  ready, but the account's two batch GPU sessions are taken by another project with priority, so no Kaggle run.
+- **Stage 2, rotated-crop refiner (2026-11-07/08, `filseg/stage2.py`, `scripts/experiments/stage2_oof.py`,
+  runs/stage2)**: unlike the rejected 2026-11-03 crop refiner (axis-aligned box crops around the old U-Net
+  proposals), every instance the tree scorer selects is redrawn in a crop turned along its principal axis
+  (384x128, native resolution, scaled down only if needed), with the stage-1 probability, the seed and the other
+  seeds as extra channels, and the mean of the matching annotators' masks as the target. Crops: 4,429 from the CV
+  selections of the 5-fold OOF pipeline, 3,827 drawn by at least one annotator (1,341 s). ResNet-34 U-Net, 30
+  epochs, about 32 s/epoch on MPS, 16-20 min per fold; each fold's crops predicted by the model that did not see
+  them. OOF pooled PQ (707 images), seeds 0.4267 (reproduces the pipeline), refined at pixel threshold 0.30
+  0.4291, 0.35 0.4319, **0.40 0.4330**, 0.45 0.4330, 0.50 0.4320, 0.55 0.4302. At the preset 0.40: paired gain
+  +0.0063, bootstrap 95% [0.0033, 0.0093]; per fold seed/refined 0.4340/0.4341, 0.4247/0.4326, 0.4107/0.4189,
+  0.4304/0.4423, 0.4341/0.4370 (no fold worse). The threshold is the one fixed before the run, not the OOF best.
+  About a quarter of one public-LB display step, so the LB may not show it; the choice rests on the OOF. Next:
+  the five fold refiners as an ensemble in `filseg.predict` and the notebook.
 
 ## 6. Reference points from other entrants
 
