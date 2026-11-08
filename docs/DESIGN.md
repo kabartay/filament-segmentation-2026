@@ -350,7 +350,7 @@ Each entry: what we tried, the result, and what we decided.
   `tu-convnext_tiny` (timm via smp, 31.9M parameters vs 24.4M), lr 3e-4, otherwise as ResNet-34 at 1536 px. About
   1,150 s/epoch on the M3 Max (4.3x ResNet-34), up to 2,800 s when the GPU was shared. Default-setting val PQ
   e5 0.298, e10 0.358, e15 0.366, e20 0.395, e25 0.389, e30 0.403 (ResNet-34: 0.295, 0.333, 0.369, 0.379, 0.395,
-  0.398). The chain stopped at epoch 31 when the Claude session ended; best.pt is epoch 30. Tuned on fold 0 (2-view
+  0.398). The chain was interrupted at epoch 31; best.pt is epoch 30. Tuned on fold 0 (2-view
   maps, `filseg.tune`): ConvNeXt-T 0.4161 (threshold 0.55), ResNet-34 0.4245, average of the two
   (`filseg.ensemble`) 0.4261, so +0.0016 over ResNet-34 alone, below what one fold resolves. Not continued to
   folds 1-4 (about 50 GPU hours on the Mac).
