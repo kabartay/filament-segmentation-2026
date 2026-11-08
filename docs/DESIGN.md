@@ -26,7 +26,7 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 | Instances per image (median) | 7 | |
 | Instance area, 5th-95th percentile | 316 to 6963 px | Sets the range for the minimum-area filter |
 
-## 3. Pipeline (current, submission 6 candidate, 2026-11-05)
+## 3. Pipeline (current, submission 7 candidate, 2026-11-08)
 
 1. **Cache** (`filseg/cache.py`): images area-downsampled to 1536 px; target = fraction
    of annotators marking each pixel, computed at 2048 then downsampled.
@@ -44,8 +44,15 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 6. **Selection**: hurdle scorer P(match) x E[IoU | match] (`weights/tree_scorer_1536.pkl`, fitted on the
    72,712 out-of-fold nodes, rows weighted by annotator count); exact antichain maximising sum(score - 0.26).
    Disjoint by construction (checked on the submission: 0 overlapping pairs).
-7. **Submission** (`filseg/predict.py --tree-scorer`): writes and validates the CSV (unique ids, known
+7. **Stage 2** (`filseg/stage2.py`, `--refiner`): each selected instance redrawn in a 384x128 crop along its
+   principal axis by the five fold refiners (`weights/stage2_unet_f{0..4}.pt`, float16) and four flips,
+   threshold 0.40, pasted back disjoint (see the stage-2 entry in section 5).
+8. **Submission** (`filseg/predict.py --tree-scorer --refiner`): writes and validates the CSV (unique ids, known
    stems, non-empty 2048 masks), records runtime per image. `pipeline.ipynb` reproduces it.
+
+With stage 2, out of fold: PQ 0.4330 [0.423, 0.442], SQ 0.677, RQ 0.639; per fold 0.433 +- 0.009; multi-annotator
+images 0.434 (SQ 0.674, RQ 0.644); +0.0063 [0.0033, 0.0093] over stage 1, all five folds. Stage 1 alone (the
+submission-6 pipeline):
 
 Out of fold: PQ 0.4267 [0.417, 0.436]; +0.0049 [0.0012, 0.0085] over submission 5 (single threshold +
 scorer, 0.4219) and +0.0182 [0.0134, 0.0233] over submission 4 (1024 px hand rule, 0.4086); per fold
@@ -360,8 +367,15 @@ Each entry: what we tried, the result, and what we decided.
   0.4291, 0.35 0.4319, **0.40 0.4330**, 0.45 0.4330, 0.50 0.4320, 0.55 0.4302. At the preset 0.40: paired gain
   +0.0063, bootstrap 95% [0.0033, 0.0093]; per fold seed/refined 0.4340/0.4341, 0.4247/0.4326, 0.4107/0.4189,
   0.4304/0.4423, 0.4341/0.4370 (no fold worse). The threshold is the one fixed before the run, not the OOF best.
-  About a quarter of one public-LB display step, so the LB may not show it; the choice rests on the OOF. Next:
-  the five fold refiners as an ensemble in `filseg.predict` and the notebook.
+  About a quarter of one public-LB display step, so the LB may not show it; the choice rests on the OOF.
+  Extended eval at 0.40 (`--name final`, runs/stage2/unet_final.json): PQ 0.4330 [0.4234, 0.4419], SQ 0.6771,
+  RQ 0.6394 (stage 1: 0.4267 [0.4170, 0.4358], 0.6749, 0.6322); the gain is mostly RQ, i.e. redrawn fragments
+  crossing IoU 0.5; 296 multi-annotator images 0.4341 (SQ 0.6743, RQ 0.6438).
+- **Submission 7 candidate (2026-11-08, `submissions/sub7_r34_1536_tree_stage2.csv`)**: submission 6 plus stage 2,
+  the five fold refiners averaged (no all-data refiner: the fold models are the ones evaluated), stored as
+  float16 (49 MB each; at threshold 0.40 about 1 crop pixel in 10^5 differs from float32). 1,066 filaments on
+  177 of 180 images (submission 6: 1,067), no overlapping pixels; against submission 6 the median best-match IoU
+  is 0.911, 137 masks below 0.8 and 1 below 0.5; total mask area +1.4%. 6.6 s per image on MPS.
 
 ## 6. Reference points from other entrants
 
