@@ -9,11 +9,14 @@ Steps (each reads what the previous one wrote under runs/stage2/):
          own fold's crops -> <tag>_f{k}.pt, <tag>_pred.npy (all folds filled in)
   eval   paste-back at several pixel thresholds, pooled PQ against every annotator entry, paired bootstrap against
          stage 1 alone (the submitted pipeline, OOF 0.4267) -> <tag>_eval.json
+  export the fold refiners as float16 state dicts for inference -> weights/stage2_<tag>_f{k}.pt (about 49 MB each;
+         at threshold 0.40 about 1 crop pixel in 10^5 changes against float32)
 
 Run (FILSEG_CACHE=data/cache1536, PYTHONPATH=.):
   .venv/bin/python scripts/experiments/stage2_oof.py crops --workers 4
   .venv/bin/python scripts/experiments/stage2_oof.py train --tag unet --arch Unet --epochs 30
   .venv/bin/python scripts/experiments/stage2_oof.py eval --tag unet --workers 4
+  .venv/bin/python scripts/experiments/stage2_oof.py export --tag unet
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ import torch.nn.functional as F
 from pycocotools import mask as mask_util
 
 from filseg.cache import CACHE
-from filseg.data import TRAIN_IMAGES, group_by_stem, load_train, read_image
+from filseg.data import ROOT, TRAIN_IMAGES, group_by_stem, load_train, read_image
 from filseg.geometry import fit_disk
 from filseg.metric import PQCounts, iou_matrix
 from filseg.postprocess import components, upsample
@@ -225,7 +228,7 @@ def pq(m: np.ndarray) -> np.ndarray:
     return s[..., 0] / (s[..., 1] + 0.5 * s[..., 2] + 0.5 * s[..., 3])
 
 
-def step_eval(tag: str, workers: int, thresholds: tuple[float, ...]) -> None:
+def step_eval(tag: str, workers: int, thresholds: tuple[float, ...], name: str = "eval") -> None:
     meta = pickle.load(open(OUT / "meta.pkl", "rb"))
     t0 = time.time()
     with ProcessPoolExecutor(workers, initializer=_init_eval, initargs=(tag,)) as ex:
@@ -237,20 +240,42 @@ def step_eval(tag: str, workers: int, thresholds: tuple[float, ...]) -> None:
     rng = np.random.default_rng(0)
     idx = rng.integers(0, len(stems), size=(2000, len(stems)))
     base = pq(A["seed"][idx])
-    report = {"images": len(stems), "seconds": round(time.time() - t0)}
+    groups = group_by_stem(load_train())
+    multi = np.array([len(groups[s]) >= 2 for s in stems])
+
+    def sq_rq(m: np.ndarray) -> tuple[float, float]:
+        t = m.sum(axis=0)
+        return float(t[0] / t[1]), float(t[1] / (t[1] + 0.5 * t[2] + 0.5 * t[3]))
+
+    report = {"images": len(stems), "multi_annotator_images": int(multi.sum()), "seconds": round(time.time() - t0)}
     for k in keys:
         b = pq(A[k][idx])
-        report[k] = {"pq": round(float(pq(A[k])), 5),
-                     "per_fold": [round(float(pq(A[k][fold == f])), 4) for f in range(5)],
+        per_fold = [float(pq(A[k][fold == f])) for f in range(5)]
+        sq, rq = sq_rq(A[k])
+        msq, mrq = sq_rq(A[k][multi])
+        report[k] = {"pq": round(float(pq(A[k])), 5), "sq": round(sq, 4), "rq": round(rq, 4),
+                     "pq_ci95": [round(float(v), 4) for v in np.percentile(b, [2.5, 97.5])],
+                     "per_fold": [round(v, 4) for v in per_fold],
+                     "per_fold_mean_sd": [round(float(np.mean(per_fold)), 4), round(float(np.std(per_fold, ddof=1)), 4)],
+                     "multi": {"pq": round(float(pq(A[k][multi])), 4), "sq": round(msq, 4), "rq": round(mrq, 4)},
                      "gain": round(float(pq(A[k]) - pq(A["seed"])), 5),
-                     "gain_ci95": [round(float(v), 5) for v in np.percentile(b - base, [2.5, 97.5])]}
-    (OUT / f"{tag}_eval.json").write_text(json.dumps(report, indent=1))
+                     "gain_ci95": [round(float(v), 5) for v in np.percentile(b - base, [2.5, 97.5])],
+                     "gain_folds_positive": int(sum(pq(A[k][fold == f]) > pq(A["seed"][fold == f]) for f in range(5)))}
+    (OUT / f"{tag}_{name}.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
+
+
+def step_export(tag: str, folds: list[int]) -> None:
+    for f in folds:
+        state = torch.load(OUT / f"{tag}_f{f}.pt", map_location="cpu")
+        out = ROOT / "weights" / f"stage2_{tag}_f{f}.pt"
+        torch.save({k: v.half() if v.is_floating_point() else v for k, v in state.items()}, out)
+        print(f"fold {f} -> {out}", flush=True)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=["crops", "train", "eval"])
+    ap.add_argument("step", choices=["crops", "train", "eval", "export"])
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--tag", default="unet")
     ap.add_argument("--arch", default="Unet")
@@ -260,13 +285,16 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--folds", default="0,1,2,3,4")
     ap.add_argument("--thresholds", default="0.30,0.35,0.40,0.45,0.50,0.55")
+    ap.add_argument("--name", default="eval", help="eval: report written to <tag>_<name>.json")
     a = ap.parse_args()
     if a.step == "crops":
         step_crops(a.workers)
     elif a.step == "train":
         step_train(a.tag, a.arch, a.encoder, a.epochs, a.batch, a.lr, [int(k) for k in a.folds.split(",")])
+    elif a.step == "export":
+        step_export(a.tag, [int(k) for k in a.folds.split(",")])
     else:
-        step_eval(a.tag, a.workers, tuple(float(t) for t in a.thresholds.split(",")))
+        step_eval(a.tag, a.workers, tuple(float(t) for t in a.thresholds.split(",")), a.name)
 
 
 if __name__ == "__main__":

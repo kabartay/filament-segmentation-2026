@@ -160,6 +160,40 @@ def predict_crops(models: list[torch.nn.Module], x: np.ndarray, device: str, bat
     return out
 
 
+def load_refiners(paths: list, device: str, arch: str = "Unet", encoder: str = "resnet34") -> list[torch.nn.Module]:
+    """Refiner checkpoints (float16 or float32 state dicts) as float32 models in eval mode."""
+    models = []
+    for p in paths:
+        m = build_refiner(arch, encoder, pretrained=False)
+        state = torch.load(p, map_location="cpu")
+        m.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
+        models.append(m.to(device).eval())
+    return models
+
+
+def refine(models: list[torch.nn.Module], image: np.ndarray, prob: np.ndarray, rles: list[dict],
+           score: np.ndarray, device: str, t_pix: float = T_PIX) -> list[dict]:
+    """Stage 2 on one image: the selected instances redrawn by the refiners, as disjoint COCO RLEs.
+
+    Args:
+        models: refiners (``load_refiners``); their outputs are averaged over models and four flips.
+        image: (SIZE, SIZE) uint8 raw image.
+        prob: (SIZE, SIZE) float32 stage-1 probability (the mean of the flipped views, upsampled).
+        rles: stage-1 selected instances (``TreeScorer.select_scored``).
+        score: their stage-1 scores.
+        device: torch device of the models.
+        t_pix: pixel threshold of the refined probability.
+    """
+    if not rles:
+        return []
+    seeds = [mask_util.decode(r).astype(bool) for r in rles]
+    x, frames = crop_inputs(image, prob, seeds)
+    pred = predict_crops(models, x, device)
+    refined = [None if fr.scale < MIN_SCALE else unwarp(q, fr) for q, fr in zip(pred, frames)]
+    masks = paste_back(seeds, refined, np.asarray(score), t_pix)
+    return [mask_util.encode(np.asfortranarray(m.astype(np.uint8))) for m in masks]
+
+
 def paste_back(seeds: list[np.ndarray], refined: list[np.ndarray | None], score: np.ndarray,
                t_pix: float = T_PIX) -> list[np.ndarray]:
     """Disjoint final masks of one image.

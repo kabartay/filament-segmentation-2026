@@ -190,9 +190,16 @@ class TreeScorer:
             disk: fitted solar disk.
             spread: (2048, 2048) per-pixel std of the four flipped views.
         """
+        return self.select_scored(full, img, disk, spread)[0]
+
+    def select_scored(self, full: np.ndarray, img: np.ndarray, disk: Disk,
+                      spread: np.ndarray) -> tuple[list[dict], np.ndarray]:
+        """``select`` together with the kept instances' scores (stage 2 absorbs the lower-scored first)."""
         rles, feats, _, parent = tree_candidates(full, img, disk, self.levels, spread)
         add_context(feats, parent)
-        return [rles[j] for j in sorted(antichain(self.predict(feats), parent, self.tau))]
+        score = self.predict(feats)
+        chosen = sorted(antichain(score, parent, self.tau))
+        return [rles[j] for j in chosen], np.asarray(score)[chosen]
 
 
 def load_tree_scorer(path: Path) -> TreeScorer:

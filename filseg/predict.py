@@ -4,7 +4,8 @@ Each row is one predicted filament: ``filament_id`` = ``<image stem>_<n>`` and
 ``segmentation_rle`` = compressed COCO RLE counts of a 2048 x 2048 mask. Images with no
 predicted filament get no rows; the scorer counts their annotations as misses.
 
-Run: ``.venv/bin/python -m filseg.predict --weights runs/unet_r34_f-1/last.pt --post runs/unet_r34_f0/tune.json``
+Run (final pipeline): ``.venv/bin/python -m filseg.predict --weights weights/unet_r34_1536_all.pt --views 4
+--tree-scorer weights/tree_scorer_1536.pkl --refiner weights/stage2_unet_f0.pt ... weights/stage2_unet_f4.pt``
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from filseg.ensemble import pool_views
 from filseg.geometry import fit_disk
 from filseg.postprocess import PostConfig, instances, upsample
 from filseg.scorer import load_scorer
+from filseg.stage2 import T_PIX, load_refiners, refine
 from filseg.train import build_model, image_cache, predict, predict_with_spread
 from filseg.tree import load_tree_scorer
 
@@ -68,6 +70,9 @@ def main() -> None:
                         help="component scorer pickle (filseg.scorer); replaces the --post rule")
     parser.add_argument("--tree-scorer", type=Path, default=None,
                         help="tree scorer pickle (filseg.tree); 4 views with their spread; replaces --scorer and --post")
+    parser.add_argument("--refiner", nargs="+", default=None,
+                        help="stage-2 refiner checkpoints (filseg.stage2), averaged; needs --tree-scorer")
+    parser.add_argument("--refine-t", type=float, default=T_PIX, help="stage-2 pixel threshold")
     args = parser.parse_args()
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -78,6 +83,7 @@ def main() -> None:
     tree = load_tree_scorer(args.tree_scorer) if args.tree_scorer else None
     if tree is not None:
         assert args.views == 4, "the tree scorer takes each model's four views"
+    assert args.refiner is None or tree is not None, "stage 2 refines the tree scorer's selection"
     encoders = args.encoders or [args.encoder] * len(args.weights)
     assert len(encoders) == len(args.weights), "give one encoder per checkpoint"
     started = time.time()
@@ -103,13 +109,16 @@ def main() -> None:
         for k in range(len(images)):
             probs[k], spread[k] = pool_views([m[k] for m in means], [sd[k] for sd in spreads])
 
+    refiners = load_refiners(args.refiner, device) if args.refiner else None
     rows = []
     plain = np.load(CACHE / "test_images.npy", mmap_mode="r")  # the disk is fitted on the plain image
     for k, stem in enumerate(stems):
         disk = fit_disk(np.array(plain[k]))
         if tree is not None:
-            kept = tree.select(upsample(probs[k]), read_image(TEST_IMAGES / f"{stem}.jpeg"), disk,
-                               upsample(spread[k].astype(np.float32)))
+            full, image = upsample(probs[k]), read_image(TEST_IMAGES / f"{stem}.jpeg")
+            kept, score = tree.select_scored(full, image, disk, upsample(spread[k].astype(np.float32)))
+            if refiners is not None:
+                kept = refine(refiners, image, full, kept, score, device, args.refine_t)
         elif scorer is not None:
             kept = scorer.select(upsample(probs[k]), read_image(TEST_IMAGES / f"{stem}.jpeg"), disk)
         else:
@@ -123,7 +132,8 @@ def main() -> None:
     write_csv(rows, out, stems)
     with_preds = len({r[0].rsplit('_', 1)[0] for r in rows})
     if tree is not None:
-        selection = {"tree_scorer": str(args.tree_scorer), "tau": tree.tau, "levels": list(tree.levels)}
+        selection = {"tree_scorer": str(args.tree_scorer), "tau": tree.tau, "levels": list(tree.levels),
+                     "refiner": args.refiner, "refine_t": args.refine_t if args.refiner else None}
     elif scorer is not None:
         selection = {"scorer": str(args.scorer), "tau": scorer.tau}
     else:
