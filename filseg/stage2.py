@@ -91,32 +91,51 @@ def crop_inputs(image: np.ndarray, prob: np.ndarray, seeds: list[np.ndarray]) ->
         prob: (SIZE, SIZE) float32 stage-1 probability.
         seeds: boolean (SIZE, SIZE) masks of the selected instances.
     """
-    union = np.zeros((SIZE, SIZE), np.uint8)
+    union = np.zeros((SIZE, SIZE), bool)
     for s in seeds:
-        union[s] = 1
-    prob8 = np.clip(prob * 255 + 0.5, 0, 255).astype(np.uint8)
+        union |= s
+    prob8 = to_u8(prob)
     out = np.zeros((len(seeds), len(CHANNELS), CROP_H, CROP_W), np.uint8)
     frames = []
     for i, s in enumerate(seeds):
-        fr = frame_of(s)
-        seed8 = s.astype(np.uint8)
-        out[i, 0] = warp(image, fr)
-        out[i, 1] = warp(prob8, fr)
-        out[i, 2] = warp(seed8 * 255, fr)
-        out[i, 3] = warp(((union > 0) & ~s).astype(np.uint8) * 255, fr)
+        out[i], fr = crop_one(image, prob8, s, union & ~s)
         frames.append(fr)
     return out, frames
 
 
-def crop_target(seed: np.ndarray, entries: list[list[dict]], frame: Frame) -> tuple[np.ndarray, int]:
+def to_u8(prob: np.ndarray) -> np.ndarray:
+    """A probability map in [0, 1] as uint8, the form ``crop_one`` takes."""
+    return np.clip(prob * 255 + 0.5, 0, 255).astype(np.uint8)
+
+
+def crop_one(image: np.ndarray, prob8: np.ndarray, seed: np.ndarray, others: np.ndarray) -> tuple[np.ndarray, Frame]:
+    """(4, CROP_H, CROP_W) uint8 input of one seed and its frame.
+
+    Args:
+        image: (SIZE, SIZE) uint8 raw image.
+        prob8: (SIZE, SIZE) uint8 stage-1 probability (``to_u8``).
+        seed: boolean (SIZE, SIZE) mask to redraw.
+        others: boolean (SIZE, SIZE) mask of the neighbouring instances (not overlapping ``seed``).
+    """
+    fr = frame_of(seed)
+    x = np.stack([warp(image, fr), warp(prob8, fr), warp(seed.astype(np.uint8) * 255, fr),
+                  warp(others.astype(np.uint8) * 255, fr)])
+    return x, fr
+
+
+def crop_target(seed: np.ndarray, entries: list[list[dict]], frame: Frame,
+                contain: float | None = None) -> tuple[np.ndarray, int]:
     """Soft target crop (CROP_H, CROP_W) uint8 and the number of annotator entries that drew the filament.
 
     Args:
         seed: boolean (SIZE, SIZE) seed mask.
         entries: per annotator entry, its filament RLEs.
         frame: the seed's crop frame.
+        contain: if set, an entry's best-IoU mask also counts as drawing the filament when it holds at least
+            this share of the seed's area (the seed is a fragment of it), whatever the IoU.
     """
     seed_rle = mask_util.encode(np.asfortranarray(seed.astype(np.uint8)))
+    seed_area = float(mask_util.area(seed_rle))
     acc = np.zeros((CROP_H, CROP_W), np.float32)
     drew = 0
     for rles in entries:
@@ -124,7 +143,11 @@ def crop_target(seed: np.ndarray, entries: list[list[dict]], frame: Frame) -> tu
             continue
         iou = np.asarray(mask_util.iou(rles, [seed_rle], [0])).ravel()
         k = int(iou.argmax())
-        if iou[k] > DREW_IOU:
+        inside = 0.0
+        if contain is not None and iou[k] > 0:
+            area_k = float(mask_util.area(rles[k]))
+            inside = iou[k] * (area_k + seed_area) / (1 + iou[k]) / seed_area  # |seed & mask| / |seed|
+        if iou[k] > DREW_IOU or (contain is not None and inside >= contain):
             acc += warp(mask_util.decode(rles[k]).astype(np.float32), frame)
             drew += 1
     target = acc / drew if drew else acc

@@ -9,6 +9,11 @@ Steps (each reads what the previous one wrote under runs/stage2/):
          own fold's crops -> <tag>_f{k}.pt, <tag>_pred.npy (all folds filled in)
   eval   paste-back at several pixel thresholds, pooled PQ against every annotator entry, paired bootstrap against
          stage 1 alone (the submitted pipeline, OOF 0.4267) -> <tag>_eval.json
+  jitter extra training crops: tree nodes at other levels than the selected seed (fragments, thinner or wider
+         versions of a filament), matched to an annotator mask by IoU > DREW_IOU or by containment >= CONTAIN,
+         near-duplicates (IoU > JIT_DEDUP with a seed or a kept node) skipped -> jit_crops.npy, jit_targets.npy,
+         jit_meta.pkl. Only for training (``train --extra jit``); evaluation stays on the selected seeds.
+  blend  average the OOF crop predictions of several tags -> <out>_pred.npy, to evaluate an ensemble of refiners
   export the fold refiners as float16 state dicts for inference -> weights/stage2_<tag>_f{k}.pt (about 49 MB each;
          at threshold 0.40 about 1 crop pixel in 10^5 changes against float32)
 
@@ -43,8 +48,8 @@ from filseg.geometry import fit_disk
 from filseg.metric import PQCounts, iou_matrix
 from filseg.postprocess import components, upsample
 from filseg.scorer import CANDIDATE_CLOSE_PX, CANDIDATE_MIN_AREA
-from filseg.stage2 import (CHANNELS, CROP_H, CROP_W, MIN_SCALE, Frame, build_refiner, crop_inputs, crop_target,
-                           paste_back, predict_crops, to_tensor, unwarp)
+from filseg.stage2 import (CHANNELS, CROP_H, CROP_W, MIN_SCALE, Frame, build_refiner, crop_inputs, crop_one,
+                           crop_target, paste_back, predict_crops, to_tensor, to_u8, unwarp)
 from filseg.train import RUNS, soft_dice_loss
 from filseg.tree import add_context, antichain, fit_hurdle
 from filseg.tree import training_table as tree_table
@@ -53,11 +58,20 @@ NODES = RUNS / "oof_tree12s_1536_v4.pkl"
 PROBS_RUN = "unet_r34_1536"
 TAU = 0.26
 OUT = RUNS / "stage2"
+CONTAIN = 0.5  # jitter: a node with at least this share of its area inside an annotator's filament is a fragment of it
+JIT_DEDUP = 0.85  # jitter: nodes this similar (IoU) to a selected seed or to an already-kept node are skipped
+JIT_PER_SEED = 4  # jitter: at most this many extra crops per selected seed of the image (nodes visited in random order)
 G: dict = {}
 
 
 def oof_selection() -> list[dict]:
-    """Per image: stem, fold, levels, node counts per level, chosen node indices and their scores."""
+    """Per image: stem, fold, levels, node counts per level, chosen node indices and their scores.
+
+    Cached in runs/stage2/selection.pkl (the CV hurdle fits take minutes); delete it to recompute.
+    """
+    cache = OUT / "selection.pkl"
+    if cache.exists():
+        return pickle.load(open(cache, "rb"))
     data = pickle.load(open(NODES, "rb"))
     for d in data:
         add_context(d["feats"], d["parent"])
@@ -74,6 +88,8 @@ def oof_selection() -> list[dict]:
         chosen = sorted(antichain(s, d["parent"], TAU))
         out.append(dict(stem=d["stem"], fold=d["fold"], level=np.asarray(d["level"]), chosen=chosen,
                         score=s[chosen]))
+    OUT.mkdir(parents=True, exist_ok=True)
+    pickle.dump(out, open(cache, "wb"))
     return out
 
 
@@ -135,6 +151,77 @@ def step_crops(workers: int) -> None:
     print(f"{n} crops, {int((drew > 0).sum())} drawn by some annotator, {time.time() - t0:.0f} s -> {OUT}", flush=True)
 
 
+def _jitter_one(sel: dict) -> dict:
+    stem, f = sel["stem"], sel["fold"]
+    full = upsample(np.asarray(G["probs"][f][G["pos"][f][stem]], np.float32))
+    disk = fit_disk(np.array(G["images"][G["index"].index(stem)]))
+    levels = sorted(set(float(v) for v in sel["level"]))
+    rles = []
+    for lv in levels:  # the node numbering of filseg.tree.tree_candidates (lowest level first)
+        rles += [c.rle for c in components(full, lv, CANDIDATE_CLOSE_PX, disk, min_area=CANDIDATE_MIN_AREA)]
+    assert len(rles) == len(sel["level"]), f"{stem}: {len(rles)} nodes recomputed, {len(sel['level'])} cached"
+    chosen = set(sel["chosen"])
+    seeds = [mask_util.decode(rles[j]).astype(bool) for j in sel["chosen"]]
+    entries = [e.rles for e in G["groups"][stem]]
+    gt = [r for rl in entries for r in rl]
+    rest = [j for j in range(len(rles)) if j not in chosen]
+    out = dict(stem=stem, fold=f, x=[], y=[], drew=[], level=[])
+    if not rest or not gt:
+        return out
+    near_seed = (np.asarray(mask_util.iou([rles[j] for j in rest], [rles[j] for j in sel["chosen"]],
+                                          [0] * len(chosen))).reshape(len(rest), -1).max(axis=1)
+                 if chosen else np.zeros(len(rest)))
+    kept: list[dict] = []
+    cap = JIT_PER_SEED * max(1, len(seeds))
+    order = np.random.default_rng(int(stem[:14])).permutation(len(rest))
+    rest, near_seed = [rest[i] for i in order], near_seed[order]
+    image = read_image(TRAIN_IMAGES / f"{stem}.jpeg")
+    prob8 = to_u8(full)
+    for j, ns in zip(rest, near_seed):
+        if len(kept) >= cap:
+            break
+        if ns > JIT_DEDUP:
+            continue
+        if kept and np.asarray(mask_util.iou([rles[j]], kept, [0] * len(kept))).max() > JIT_DEDUP:
+            continue
+        node = mask_util.decode(rles[j]).astype(bool)
+        others = np.zeros_like(node)
+        for sd in seeds:
+            if not (sd & node).any():  # seeds overlapping the node are versions of the same filament
+                others |= sd
+        x, fr = crop_one(image, prob8, node, others)
+        t, k = crop_target(node, entries, fr, contain=CONTAIN)
+        if k == 0:
+            continue
+        kept.append(rles[j])
+        out["x"].append(x)
+        out["y"].append(t)
+        out["drew"].append(k)
+        out["level"].append(float(sel["level"][j]))
+    return out
+
+
+def step_jitter(workers: int) -> None:
+    t0 = time.time()
+    sels = oof_selection()
+    with ProcessPoolExecutor(workers, initializer=_init_crops) as ex:
+        recs = list(ex.map(_jitter_one, sels, chunksize=2))
+    n = sum(len(r["drew"]) for r in recs)
+    X = np.lib.format.open_memmap(OUT / "jit_crops.npy", "w+", np.uint8, (n, len(CHANNELS), CROP_H, CROP_W))
+    Y = np.lib.format.open_memmap(OUT / "jit_targets.npy", "w+", np.uint8, (n, CROP_H, CROP_W))
+    meta, row = [], 0
+    for r in recs:
+        k = len(r["drew"])
+        if k:
+            X[row:row + k], Y[row:row + k] = np.stack(r["x"]), np.stack(r["y"])
+        meta.append(dict(stem=r["stem"], fold=r["fold"], row=row, n=k, drew=r["drew"], level=r["level"]))
+        row += k
+    X.flush()
+    Y.flush()
+    pickle.dump(meta, open(OUT / "jit_meta.pkl", "wb"))
+    print(f"{n} extra crops from {sum(1 for m in meta if m['n'])} images, {time.time() - t0:.0f} s -> {OUT}", flush=True)
+
+
 def rows_of(meta: list[dict]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per crop: fold, number of annotators who drew it, scale."""
     fold = np.concatenate([[m["fold"]] * m["n"] for m in meta if m["n"]])
@@ -143,12 +230,43 @@ def rows_of(meta: list[dict]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return fold, drew, scale
 
 
-def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: float, folds: list[int]) -> None:
+def augment(x: torch.Tensor, y: torch.Tensor, rng: np.random.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-sample flips and a small affine jitter (rotation +-10 deg, scale 0.9-1.1, shift +-10 px), applied
+    identically to the input channels and the target with one bilinear resampling."""
+    n = x.shape[0]
+    ang = np.deg2rad(rng.uniform(-10, 10, n))
+    sc = rng.uniform(0.9, 1.1, n)
+    fx = np.where(rng.random(n) < 0.5, -1.0, 1.0)
+    fy = np.where(rng.random(n) < 0.5, -1.0, 1.0)
+    tx, ty = rng.uniform(-10, 10, n), rng.uniform(-10, 10, n)
+    hw, hh = CROP_W / 2, CROP_H / 2
+    theta = np.zeros((n, 2, 3), np.float32)  # output -> input sampling, in normalised coordinates
+    cos, sin = np.cos(ang) / sc, np.sin(ang) / sc
+    theta[:, 0, 0] = cos * fx
+    theta[:, 0, 1] = -sin * fy * hh / hw
+    theta[:, 1, 0] = sin * fx * hw / hh
+    theta[:, 1, 1] = cos * fy
+    theta[:, 0, 2] = tx / hw
+    theta[:, 1, 2] = ty / hh
+    th = torch.from_numpy(theta).to(x.device)
+    both = torch.cat([x, y], dim=1)
+    grid = F.affine_grid(th, list(both.shape), align_corners=False)
+    both = F.grid_sample(both, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
+    return both[:, :-1], both[:, -1:]
+
+
+def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: float, folds: list[int],
+               extra: str | None = None, aug: bool = False) -> None:
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     X = np.load(OUT / "crops.npy", mmap_mode="r")
     Y = np.load(OUT / "targets.npy", mmap_mode="r")
     meta = pickle.load(open(OUT / "meta.pkl", "rb"))
     fold, drew, _ = rows_of(meta)
+    if extra:  # extra training crops (step jitter); never predicted or evaluated
+        XE = np.load(OUT / f"{extra}_crops.npy", mmap_mode="r")
+        YE = np.load(OUT / f"{extra}_targets.npy", mmap_mode="r")
+        fold_e = np.concatenate([[m["fold"]] * m["n"] for m in pickle.load(open(OUT / f"{extra}_meta.pkl", "rb"))
+                                 if m["n"]])
     pred_path = OUT / f"{tag}_pred.npy"
     pred = (np.load(pred_path) if pred_path.exists() else np.zeros((len(X), CROP_H, CROP_W), np.float16))
     log = open(OUT / f"{tag}_train.log", "a")
@@ -157,6 +275,10 @@ def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: f
         rng = np.random.default_rng(f)
         tr = np.nonzero((fold != f) & (drew > 0))[0]
         Xtr, Ytr = np.asarray(X[tr]), np.asarray(Y[tr])
+        if extra:
+            te_ = np.nonzero(fold_e != f)[0]
+            Xtr, Ytr = np.concatenate([Xtr, np.asarray(XE[te_])]), np.concatenate([Ytr, np.asarray(YE[te_])])
+            tr = np.arange(len(Xtr))
         model = build_refiner(arch, encoder).to(device)
         opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
         steps = epochs * (len(tr) // batch)
@@ -170,11 +292,14 @@ def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: f
                 idx = perm[b * batch:(b + 1) * batch]
                 x = to_tensor(Xtr[idx])
                 y = torch.from_numpy(Ytr[idx]).float()[:, None] / 255.0
-                if rng.random() < 0.5:
-                    x, y = x.flip(-1), y.flip(-1)
-                if rng.random() < 0.5:
-                    x, y = x.flip(-2), y.flip(-2)
-                x, y = x.to(device), y.to(device)
+                if aug:
+                    x, y = augment(x.to(device), y.to(device), rng)
+                else:
+                    if rng.random() < 0.5:
+                        x, y = x.flip(-1), y.flip(-1)
+                    if rng.random() < 0.5:
+                        x, y = x.flip(-2), y.flip(-2)
+                    x, y = x.to(device), y.to(device)
                 logits = model(x)
                 loss = F.binary_cross_entropy_with_logits(logits, y) + 0.5 * soft_dice_loss(logits, y)
                 opt.zero_grad(set_to_none=True)
@@ -265,6 +390,16 @@ def step_eval(tag: str, workers: int, thresholds: tuple[float, ...], name: str =
     print(json.dumps(report, indent=1))
 
 
+def step_blend(tags: list[str], out: str) -> None:
+    preds = [np.load(OUT / f"{t}_pred.npy", mmap_mode="r") for t in tags]
+    acc = np.zeros(preds[0].shape, np.float32)
+    for lo in range(0, len(acc), 256):
+        for q in preds:
+            acc[lo:lo + 256] += np.asarray(q[lo:lo + 256], np.float32) / len(preds)
+    np.save(OUT / f"{out}_pred.npy", acc.astype(np.float16))
+    print(f"{' + '.join(tags)} -> {OUT / f'{out}_pred.npy'}", flush=True)
+
+
 def step_export(tag: str, folds: list[int]) -> None:
     for f in folds:
         state = torch.load(OUT / f"{tag}_f{f}.pt", map_location="cpu")
@@ -275,7 +410,10 @@ def step_export(tag: str, folds: list[int]) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=["crops", "train", "eval", "export"])
+    ap.add_argument("step", choices=["crops", "jitter", "train", "eval", "blend", "export"])
+    ap.add_argument("--extra", default=None, help="train: extra crop set to add, e.g. jit (from step jitter)")
+    ap.add_argument("--aug", action="store_true", help="train: per-sample flips and small affine jitter")
+    ap.add_argument("--blend", default="", help="blend: comma-separated tags to average into --tag")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--tag", default="unet")
     ap.add_argument("--arch", default="Unet")
@@ -290,7 +428,12 @@ def main() -> None:
     if a.step == "crops":
         step_crops(a.workers)
     elif a.step == "train":
-        step_train(a.tag, a.arch, a.encoder, a.epochs, a.batch, a.lr, [int(k) for k in a.folds.split(",")])
+        step_train(a.tag, a.arch, a.encoder, a.epochs, a.batch, a.lr, [int(k) for k in a.folds.split(",")],
+                   a.extra, a.aug)
+    elif a.step == "jitter":
+        step_jitter(a.workers)
+    elif a.step == "blend":
+        step_blend(a.blend.split(","), a.tag)
     elif a.step == "export":
         step_export(a.tag, [int(k) for k in a.folds.split(",")])
     else:

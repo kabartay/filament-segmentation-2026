@@ -376,6 +376,39 @@ Each entry: what we tried, the result, and what we decided.
   float16 (49 MB each; at threshold 0.40 about 1 crop pixel in 10^5 differs from float32). 1,066 filaments on
   177 of 180 images (submission 6: 1,067), no overlapping pixels; against submission 6 the median best-match IoU
   is 0.911, 137 masks below 0.8 and 1 below 0.5; total mask area +1.4%. 6.6 s per image on MPS.
+  Uploaded 2026-11-08: **public LB 0.37** (submission 6: 0.36), the first LB step since submission 6. Final
+  selection: submissions 7 and 6.
+- **Research round (2026-11-09, five read-only agents: literature, new Kaggle notebooks, stage-2 code review,
+  PQ-optimal selection, OOF error analysis)**. Findings, all estimates unless marked measured:
+  - *Kaggle since 2026-11-05*: no new technique. New notebooks are empty, write-ups of the scorer's missing
+    one-to-one matching, or re-hosts of the "LB 0.70" Mask R-CNN + crop refiner from frozen checkpoints (it
+    forbids public-MAGFiLO paths, which hints at label leakage). Public LB top 0.70/0.64/0.62 and a crowd at
+    0.56-0.60; no public method shown above about 0.39, so 0.37 sits at the top of the honest range. Forum pages
+    did not load through the fetch tool (unread).
+  - *Selection maths* (measured on OOF with a refit of the hurdle CV): the PQ denominator is exactly
+    0.5(K + G) per entry, so the marginal rule is keep a node when y > PQ/2 = 0.213, independent of the number
+    of annotators. tau 0.20 0.4240, 0.2135 0.4250, 0.24 0.4265, 0.26 0.4267, 0.28 0.4269, 0.30 0.4262: the best
+    tau sits above PQ/2 because y_hat is optimistic on the selected antichain (mean y_hat 0.523 vs y 0.456; the
+    max over correlated nodes, a winner's curse), and tau absorbs that bias. Nested isotonic calibration: no gain
+    (0.4264 at 0.26). Per-annotator-count tau: 0.4277, inside noise and n is unknown at test time. Tau per image
+    load: no gain. Images with no ground truth: none in the training set. Conclusion: selection is not where
+    the next gain is (at most +0.001).
+  - *Stage-2 code review*: no hard bug. Train/test gaps: the refiner trains only on selected seeds matched by
+    IoU > 0.3 (602 of 4,429 seeds have no match and are dropped), so it never sees fragments of a longer
+    filament or seeds cut at other thresholds; one flip decision per batch and no other augmentation for about
+    3,000 crops; the stage-1 channel comes from fold models out of fold and from the all-data model at test.
+    Checked fine: no seed touches the image border, unwarp/flip TTA consistent, OOF crops recomputed with the
+    test-time `components` call, crop scale < 1 for only 13% of seeds (43 below MIN_SCALE).
+  - *Literature*: nothing filament-specific changes the plan. Ideas: a predicted-IoU head or a refit of the
+    scorer on refined-mask features (Mask Scoring R-CNN, Huang et al. 2019), refining more tree nodes and
+    re-running the antichain, an ordinal annotator-agreement target, a boundary-band loss (low priority after
+    Lovasz and clDice failures), per-instance expected-IoU extents (RankSEG; close to the failed per-instance
+    threshold).
+  - Ranked plan from the round: (1) a second refiner architecture for the ensemble (UNet++ ResNet-34, running);
+    (2) refiner trained also on tree nodes at other levels, matched by containment as well as IoU, with
+    per-sample flips and a small affine jitter (`stage2_oof.py jitter`, `train --extra jit --aug`); (3) a
+    post-stage-2 keep/drop rescoring from the refiner's own output, if the error analysis shows it separates
+    TP from FP.
 
 ## 6. Reference points from other entrants
 
