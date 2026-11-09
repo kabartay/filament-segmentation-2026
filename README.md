@@ -10,8 +10,8 @@ candidate's expected PQ contribution, and the best disjoint set is chosen exactl
 redraws each chosen filament at native resolution in a crop turned along its own axis. Out-of-fold PQ 0.433
 (95% bootstrap interval 0.423-0.442) on all 707 training images (5-fold split by calendar month), against 0.427
 without the second stage (paired gain +0.006 [0.003, 0.009], on all five folds), 0.422 with a single threshold
-and 0.409 for the 1024 px hand-rule pipeline. Public leaderboard PQ 0.36 for the first stage, against 0.35 for
-both earlier pipelines (two decimals over about 90 images cannot resolve these gains). For scale, one human
+and 0.409 for the 1024 px hand-rule pipeline. Public leaderboard PQ 0.37 for the full pipeline, 0.36 for the first
+stage alone and 0.35 for both earlier pipelines (two decimals over about 90 images cannot resolve these gains). For scale, one human
 annotator scored against another on the same images gives PQ 0.340.
 
 ## Reproduce the submitted predictions
