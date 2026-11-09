@@ -404,6 +404,24 @@ Each entry: what we tried, the result, and what we decided.
     re-running the antichain, an ordinal annotator-agreement target, a boundary-band loss (low priority after
     Lovasz and clDice failures), per-instance expected-IoU extents (RankSEG; close to the failed per-instance
     threshold).
+  - *OOF error analysis after stage 2* (measured on every 3rd image, 236 images, 1,485 instances, subsample PQ
+    0.4260 vs 0.4330 in full, intervals about +-0.007): TP 1,629, FP 769, FN 1,141. 24% of instances match no
+    entry. Of the FN, 661 overlap no prediction, 139 are at IoU 0-0.3 and 341 near misses at 0.3-0.5, the same
+    341 before and after stage 2 (stage 2 gains elsewhere: seed TP 1,619 -> 1,629 and better IoU of matched
+    ones). 26% of the FN had an unselected tree node at IoU > 0.5; 40% have no node above 0.3. Recall by size:
+    < 300 px 0.16, 300-500 0.39, 500-1,000 0.57, 1,000-2,000 0.70, >= 2,000 0.64. Every stage-1 score bucket
+    from 0.30 up is net positive (precision per entry 0.41 at 0.30-0.35 to 0.86 at 0.60-0.80), so tau is fine.
+    The refiner's own output barely separates TP from FP: AUC for "matches something" 0.71 for the stage-1
+    score, 0.63 for the mean refined probability (1,453 of 1,472 instances have it >= 0.8), 0.43 area ratio,
+    0.40 share outside the seed. A nested, fold-held-out keep/drop rescoring: score only 0.4247 (-0.0014),
+    refiner features only 0.4260 (0), both 0.4275 (+0.0014; per fold +0.0013, -0.0003, -0.0002, +0.0028,
+    +0.0031), so at most about +0.001 in full and not adopted. An oracle that drops the net-negative instances
+    would reach 0.474: the information is annotator disagreement, which the refiner does not predict (it never
+    sees a seed nobody drew). Value of one change in full data: an FN turned into a TP at IoU 0.55 +4.3e-5 PQ,
+    one FP removed +2.8e-5. Its ranked ideas: per-instance choice among the seed and refined masks at 0.30 /
+    0.40 / 0.50 (CPU, est. +0.001-0.003); refiner retrained with the undrawn seeds as zero targets plus a head
+    for the fraction of entries that drew the instance (est. +0.003); refining more tree nodes than the chosen
+    antichain (est. +0.004, about 3x the crops).
   - Ranked plan from the round: (1) a second refiner architecture for the ensemble (UNet++ ResNet-34, running);
     (2) refiner trained also on tree nodes at other levels, matched by containment as well as IoU, with
     per-sample flips and a small affine jitter (`stage2_oof.py jitter`, `train --extra jit --aug`); (3) a
