@@ -1,4 +1,4 @@
-# Solar filament instance segmentation (MAGFiLO, Kaggle 2026)
+# Solar filament instance segmentation (MAGFiLO, Kaggle)
 
 Entry to the [Solar Filament Segmentation Challenge 2026](https://www.kaggle.com/competitions/filament-segmentation-2026):
 instance segmentation of solar filaments on GONG H-alpha full-disk images (2048 x 2048 px), scored by
