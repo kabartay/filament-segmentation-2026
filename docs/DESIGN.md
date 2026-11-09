@@ -427,6 +427,18 @@ Each entry: what we tried, the result, and what we decided.
     per-sample flips and a small affine jitter (`stage2_oof.py jitter`, `train --extra jit --aug`); (3) a
     post-stage-2 keep/drop rescoring from the refiner's own output, if the error analysis shows it separates
     TP from FP.
+- **Second refiner architecture and blend (2026-11-09, `stage2_oof.py train --tag upp --arch UnetPlusPlus
+  --epochs 30`, then `blend --tag ens --blend unet,upp`)**: UNet++ with a ResNet-34 encoder, the same crops,
+  targets and schedule as the stage-2 U-Net; 41-49 min per fold on MPS under machine load (fold 1 paused
+  overnight). OOF at pixel threshold 0.35 / **0.40** / 0.45: UNet++ alone 0.4345 / 0.4355 / 0.4351; the
+  average of the U-Net and UNet++ probabilities 0.4353 / **0.4360** / 0.4359. At 0.40 the blend has PQ 0.4360
+  [0.4264, 0.4450], SQ 0.6790, RQ 0.6422 (U-Net refiner 0.4330, 0.6771, 0.6394), multi-annotator images 0.4370;
+  over stage 1 +0.0093 [0.0065, 0.0123]. Paired against the submitted U-Net refiner (new `stage2_oof.py
+  compare`, same 2,000 image resamples): **blend +0.0031 [0.0016, 0.0044]**, per fold +0.0027, +0.0017, +0.0020,
+  +0.0024, +0.0066 (5/5); UNet++ alone +0.0025 [0.0002, 0.0047] (5/5); blend over UNet++ alone +0.0006
+  [-0.0008, 0.0020] (4/5). Unlike the stage-1 ensembles, the second architecture helps here: SQ and RQ both
+  rise. The blend is kept over UNet++ alone for its tighter interval. Per-image results:
+  `runs/stage2/{unet,upp,ens}_pi_per_image.npz`.
 
 ## 6. Reference points from other entrants
 

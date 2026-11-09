@@ -387,7 +387,34 @@ def step_eval(tag: str, workers: int, thresholds: tuple[float, ...], name: str =
                      "gain_ci95": [round(float(v), 5) for v in np.percentile(b - base, [2.5, 97.5])],
                      "gain_folds_positive": int(sum(pq(A[k][fold == f]) > pq(A["seed"][fold == f]) for f in range(5)))}
     (OUT / f"{tag}_{name}.json").write_text(json.dumps(report, indent=1))
+    np.savez(OUT / f"{tag}_{name}_per_image.npz", stems=np.array(stems), fold=fold, **A)
     print(json.dumps(report, indent=1))
+
+
+def step_compare(new: str, old: str, n_boot: int = 2000) -> None:
+    """Paired bootstrap of two evaluated variants over the same images.
+
+    Args:
+        new: ``<tag>_<name>:<key>``, e.g. ``ens_pi:t0.40`` (per-image file from step eval).
+        old: the baseline in the same form, e.g. ``unet_pi:t0.40``.
+        n_boot: bootstrap resamples of images.
+    """
+    def load(spec: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        f, k = spec.split(":")
+        z = np.load(OUT / f"{f}_per_image.npz")
+        return z["stems"], z["fold"], z[k]
+
+    sa, fold, a = load(new)
+    sb, _, b = load(old)
+    assert (sa == sb).all(), "per-image files cover different images"
+    idx = np.random.default_rng(0).integers(0, len(sa), size=(n_boot, len(sa)))
+    d = pq(a[idx]) - pq(b[idx])
+    per_fold = [round(float(pq(a[fold == f]) - pq(b[fold == f])), 4) for f in range(5)]
+    report = {"new": new, "old": old, "pq_new": round(float(pq(a)), 5), "pq_old": round(float(pq(b)), 5),
+              "gain": round(float(pq(a) - pq(b)), 5),
+              "gain_ci95": [round(float(v), 5) for v in np.percentile(d, [2.5, 97.5])],
+              "gain_per_fold": per_fold, "folds_positive": int(sum(v > 0 for v in per_fold))}
+    print(json.dumps(report), flush=True)
 
 
 def step_blend(tags: list[str], out: str) -> None:
@@ -410,7 +437,7 @@ def step_export(tag: str, folds: list[int]) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=["crops", "jitter", "train", "eval", "blend", "export"])
+    ap.add_argument("step", choices=["crops", "jitter", "train", "eval", "blend", "export", "compare"])
     ap.add_argument("--extra", default=None, help="train: extra crop set to add, e.g. jit (from step jitter)")
     ap.add_argument("--aug", action="store_true", help="train: per-sample flips and small affine jitter")
     ap.add_argument("--blend", default="", help="blend: comma-separated tags to average into --tag")
@@ -424,6 +451,8 @@ def main() -> None:
     ap.add_argument("--folds", default="0,1,2,3,4")
     ap.add_argument("--thresholds", default="0.30,0.35,0.40,0.45,0.50,0.55")
     ap.add_argument("--name", default="eval", help="eval: report written to <tag>_<name>.json")
+    ap.add_argument("--new", default="", help="compare: <tag>_<name>:<key> of the variant, e.g. ens_pi:t0.40")
+    ap.add_argument("--old", default="", help="compare: the baseline in the same form, e.g. unet_pi:t0.40")
     a = ap.parse_args()
     if a.step == "crops":
         step_crops(a.workers)
@@ -432,6 +461,8 @@ def main() -> None:
                    a.extra, a.aug)
     elif a.step == "jitter":
         step_jitter(a.workers)
+    elif a.step == "compare":
+        step_compare(a.new, a.old)
     elif a.step == "blend":
         step_blend(a.blend.split(","), a.tag)
     elif a.step == "export":
