@@ -1,0 +1,4 @@
+- [x] Numbers checked against docs/DESIGN.md (grep each OOF/paired/per-fold/LB figure). Result: all match; items DESIGN does not state are listed in the commit report.
+- [x] Method checked against filseg/stage2.py, tree.py, predict.py (T_PIX 0.40, DREW_IOU 0.3, LENGTH_PAD 1.5, MIN_SCALE 0.5, twelve levels, tau 0.26, ten refiners). Result: matches; paste-back fallbacks added.
+- [x] `cd report && tectonic -X compile main.tex`; `pdftotext -layout -f 4 -l 4 main.pdf -` shows the last body paragraph before ACKNOWLEDGMENT on page 4. Result: body ends on page 4, acknowledgment and references run onto page 5.
+- [x] No em dashes: `grep -c "—" report/main.tex` gives 0.
