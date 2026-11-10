@@ -5,7 +5,7 @@ Each row is one predicted filament: ``filament_id`` = ``<image stem>_<n>`` and
 predicted filament get no rows; the scorer counts their annotations as misses.
 
 Run (final pipeline): ``.venv/bin/python -m filseg.predict --weights weights/unet_r34_1536_all.pt --views 4
---tree-scorer weights/tree_scorer_1536.pkl --refiner weights/stage2_unet_f0.pt ... weights/stage2_unet_f4.pt``
+--tree-scorer weights/tree_scorer_1536.pkl --refiner weights/stage2_upp_f*.pt weights/stage2_jit_f*.pt``
 """
 
 from __future__ import annotations
