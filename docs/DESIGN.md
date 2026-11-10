@@ -572,6 +572,37 @@ model diversity only if GPU budget allows.
 - Consequence: no change of method; keep choosing on paired OOF, not on the public LB. Submission 8 (OOF
   0.4399) also scored 0.37.
 
+### Notebooks behind the LB groups (2026-11-10, one read-only agent; notebooks read as text, none executed)
+
+- **0.38-0.42**: legitimate pipelines from competition data only, with disjoint masks.
+  dariushafshar "solar-filament-u-net-oof-0-45-vs-public-0-39": 10 U-Nets (5 R34 + 5 EfficientNetV2-S) at
+  native 2048 px, 8-view D4 TTA, keep rule on components (low threshold 0.35, peak >= 0.99, mean p >= 0.85,
+  area >= 200); nested OOF 0.4502, LB 0.39. tushhaaarrrr "0-40" (v4, the design our stage 2 follows): OOF 0.4597,
+  LB 0.37-0.39. Both report an OOF-to-LB gap of 0.05-0.06 and attribute it to the labels (test labels sparser).
+  The teams at 0.40-0.42 are most likely these and their forks (not mapped team by team).
+- **0.55 (104 teams)**: [public notebook A] "[notebook A]" contains no model at inference; it
+  decodes a hard-coded base85 + LZMA payload ("Pre-compiled ... inference database (verified 0.55 on
+  Leaderboard)") into the submission, and the 104 teams are copies of it. We decoded the literal as data
+  (`ast.literal_eval` of the string literals, nothing executed): 1,342 masks on 178 of 180 test images,
+  median area 1,294 px (ours 1,390), no overlapping pixels and no duplicate masks, so no scorer exploit in the
+  file itself. 59% of its masks are matched by submission 8 at IoU > 0.5 (median best IoU 0.64). Where the
+  masks came from is not stated; a 0.18 public-LB lead with plausible, disjoint masks and no published model
+  is consistent with a model trained on labels of the test images (e.g. the public MAGFiLO release, which
+  covers the same GONG years), but this is not verified. Not used in any way.
+- **0.70 (one team, [top team])**: no public notebook by that user for this competition. The public "LB 0.70"
+  notebook ([public notebook B] handoff, from nomannic19's Mask R-CNN R50-FPN 1024 + ResNet-18 crop U-Net refiner)
+  loads frozen checkpoints from a model upload, claims 0.70 twice on 2026-08-05 on what it calls a
+  preliminary board with a known empty-prediction defect, and blocks "magfilo" paths; no leakage visible in
+  code, but a plain detector + refiner at 0.70 against 0.37-0.39 for OOF-validated pipelines is unexplained.
+  perseus7 "competition-metric-flaw-proof" shows that repeating a mask raises PQ under the organisers' scorer;
+  no public notebook found applying it.
+- Legitimate techniques in the 0.38-0.42 group that we do not use, with their own claimed gains: 8-view D4 TTA
+  (not stated separately), stage-1 model-family ensemble (+0.003; our own R34+R50 average gave nothing),
+  15 tree levels instead of 12 (+0.0025; our 6 -> 12 gave nothing), RF-DETR detections as scorer features
+  (+0.0034), weight EMA, forcing one connected piece per refined instance. Already in ours: soft annotator-mean
+  target with BCE + soft Dice, view-spread scorer features, the tree + hurdle + antichain, rotated crop refiner
+  with the other instances as a channel and the touching-the-seed / absorb paste-back rules.
+
 Annotator identity: image ids carry a code such as `010401` (37 codes; the last two digits are the slot
 01-03 within an image, the first four look like an annotation batch). The test set has no such codes, so
 per-annotator heads could only be averaged at test time; not pursued.
