@@ -81,7 +81,7 @@ medium severity; none needs a fix before the deadline. Scripts for every check l
 - [x] 2.5 Ids, empty images, instance dropping. Ids are `<stem>_<n>`, n = 1..k per image without gaps, all stems known,
   unique (asserted in `write_csv`); 3 of 180 test images have no row, as designed (the scorer counts their
   annotations as misses; they carry no false positives). In OOF the same rule leaves `len(chosen) == 0` for the images
-  printed by `rsub8/pastecheck.py` (see task 4). `paste_back` cannot erase every instance of an image: the instance
+  (17 of 707, 2.4%; task 4.2). `paste_back` cannot erase every instance of an image: the instance
   scored lowest is absorbed first, and the last alive one has no `others`.
 - [x] 2.6 Overlap. 0 pixels shared between any two masks on all 177 predicted test images (`csvcheck.py`). Two disjoint
   predictions cannot both have IoU > 0.5 with one ground-truth mask, so `PQCounts.multi` stays 0 and OOF PQ is not
@@ -107,6 +107,11 @@ medium severity; none needs a fix before the deadline. Scripts for every check l
 
 ## 4. Re-run and paste-back checks
 
-- [ ] 4.1 CPU re-run of two test images through `predict_with_spread` -> tree -> ten refiners, compared with the submitted
-  CSV (`rsub8/rerun.py`). Result: pending.
-- [ ] 4.2 Paste-back on every fifth OOF image with the blended refiner output (`rsub8/pastecheck.py`). Result: pending.
+- [x] 4.1 CPU re-run (single process, 1 thread, 667 s on the loaded machine) of test image `20110214175414Mh` through the
+  all-data model's four views, the tree scorer and the ten refiners (`rsub8/rerun.py`): 3 masks, each IoU 1.000 with
+  the submitted mask and identical area (1444, 1996, 975 px). So the CSV is reproducible from the weights, CPU and MPS
+  agree on this image, and the pipeline is deterministic here. Only one of the two planned images finished (the second
+  was stopped at the time budget).
+- [x] 4.2 Paste-back on every 20th OOF image with the blended refiner output (`rsub8/pastecheck.py`): 35 images, 213
+  seeds, 212 masks out (one seed absorbed), 0 overlapping pixels, 2 seeds kept as stage 1 for scale < 0.5. OOF images
+  with no selected seed: 17 of 707 (2.4%), against 3 of 180 test images (1.7%).
