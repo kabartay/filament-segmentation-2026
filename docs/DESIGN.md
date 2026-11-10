@@ -569,6 +569,22 @@ Each entry: what we tried, the result, and what we decided.
   float16 copies in `weights/` predict their own folds' crops, and the `ensj` blend at 0.40 gives PQ 0.4399, SQ 0.6803,
   RQ 0.6467, identical to the sub8 figures. The float16 conversion of the refiners costs nothing measurable. The
   baseline for every later comparison (`ensj_pi:t0.40`) is therefore back in place.
+- **UNet++ on the jitter crops, `uppj` (2026-11-11, `runs/rebuild_3_uppj.sh`, OpenSpec `stage2-uppj-refiner`)**:
+  jitter crops rebuilt (6,610 from 670 images); UNet++ R34 trained on plain + jitter crops with the affine augmentation,
+  15 epochs, five folds (8,495 crops per fold, about 57 min per fold on MPS). PQ at 0.35/0.40/0.45: 0.4409/0.4422/0.4413.
+  Paired against sub8 (`ensj_pi:t0.40`, 0.4399):
+
+  | variant | PQ at 0.40 | gain | 95% CI | per fold (0..4) | folds > 0 |
+  |---|---|---|---|---|---|
+  | uppj | 0.4422 | +0.0023 | [+0.0001, +0.0044] | -0.0008 -0.0003 +0.0049 +0.0044 +0.0033 | 3/5 |
+  | uppj + jit | 0.4410 | +0.0011 | [-0.0008, +0.0030] | -0.0007 -0.0011 +0.0034 +0.0025 +0.0010 | 3/5 |
+  | uppj + upp | 0.4410 | +0.0011 | [+0.0001, +0.0022] | -0.0009 +0.0010 +0.0012 +0.0016 +0.0028 | 4/5 |
+  | upp + jit + uppj | 0.4406 | +0.0007 | [-0.0006, +0.0019] | -0.0011 -0.0002 +0.0009 +0.0030 +0.0005 | 3/5 |
+
+  Rejected by the pre-registered rule (paired CI excluding 0 and 5/5 folds positive): no variant is positive on every
+  fold. uppj alone is the best single refiner measured (five models instead of ten, gain +0.0023 within noise of the
+  0.027-wide public LB), but the gain sits on folds 2-4 only. sub8 stays the final submission. The fold models are kept
+  locally in `runs/stage2/uppj_f*.pt` only.
 
 ## 6. Reference points from other entrants
 

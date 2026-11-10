@@ -9,7 +9,7 @@ combination is the one untested cell. Source: our own OOF results; no outside cl
 
 - Train a UNet++ (ResNet-34) on plain + jitter crops with augmentation, 15 epochs, five folds:
   `stage2_oof.py train --tag uppj --arch UnetPlusPlus --extra jit --aug --epochs 15`. Status 2026-11-10: RUNNING, log
-  `runs/stage2/uppj_train.out`.
+  `runs/stage2/uppj_train.out`. Status 2026-11-11: REJECTED by the rule below (see tasks.md 2.3).
 - Evaluate it (`eval`/`pi`), then blends: uppj alone, uppj + jit, uppj + upp + jit, compared paired against `ensj_pi:t0.40`
   and against any adopted weighted blend (`stage2-weighted-blends`).
 - If adopted: ship `weights/stage2_uppj_f{0..4}.pt` (float16, about 50 MB each) and build a new submission.
