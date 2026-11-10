@@ -83,6 +83,9 @@ def main() -> None:
     tree = load_tree_scorer(args.tree_scorer) if args.tree_scorer else None
     if tree is not None:
         assert args.views == 4, "the tree scorer takes each model's four views"
+        if images.shape[-1] != 1536:  # the tree scorer was fitted on 1536 px maps; FILSEG_CACHE=data/cache1536 selects them
+            print(f"WARNING: cached test images are {images.shape[-1]} px, the tree scorer expects 1536 px "
+                  "(set FILSEG_CACHE=data/cache1536)", flush=True)
     assert args.refiner is None or tree is not None, "stage 2 refines the tree scorer's selection"
     encoders = args.encoders or [args.encoder] * len(args.weights)
     assert len(encoders) == len(args.weights), "give one encoder per checkpoint"
@@ -139,7 +142,7 @@ def main() -> None:
     else:
         selection = cfg.__dict__
     meta = {"weights": args.weights, "encoders": encoders, "views": args.views, "post": selection, "rows": len(rows),
-            "images_with_predictions": with_preds, "images": len(stems),
+            "images_with_predictions": with_preds, "images": len(stems), "cache_res": int(images.shape[-1]),
             "seconds": round(elapsed, 1), "seconds_per_image": round(elapsed / len(stems), 3)}
     out.with_suffix(".json").write_text(json.dumps(meta, indent=1))
     print(json.dumps(meta, indent=1))
