@@ -128,7 +128,9 @@ The images and annotations are those of the Kaggle *Solar Filament Segmentation 
 (Ahmadzadeh et al. 2024, *A dataset of manually annotated filaments from H-alpha observations*, Scientific Data 11,
 1031, https://doi.org/10.1038/s41597-024-03876-y). They are not part of this repository; download them from the
 competition page. The weights in `weights/` were trained on the competition's training set, and the figures in
-`docs/figures/` and `report/figures/` show crops of its images.
+`docs/figures/` and `report/figures/` show crops of its images. The competition data may be used for non-commercial
+purposes only (competition rules, section 4), so the weights and figures are provided for the competition's evaluation,
+research and education; the MIT licence covers the code. The images are NSO/GONG data (https://gong.nso.edu/).
 
 This work utilizes GONG data obtained by the NSO Integrated Synoptic Program, managed by the National Solar
 Observatory, which is operated by the Association of Universities for Research in Astronomy (AURA), Inc. under a
