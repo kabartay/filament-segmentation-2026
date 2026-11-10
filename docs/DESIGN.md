@@ -686,6 +686,14 @@ model diversity only if GPU budget allows.
   target with BCE + soft Dice, view-spread scorer features, the tree + hurdle + antichain, rotated crop refiner
   with the other instances as a channel and the touching-the-seed / absorb paste-back rules.
 
+- **hdjojo "solar-filament-segmentation" (read 2026-11-10, public LB 0.38)**: a single YOLO26x-seg (Ultralytics) at
+  native 2048 px from frozen weights uploaded as a Kaggle model ("the 707 competition train images only"; no training
+  code, no validation score); confidence >= 0.25, NMS IoU 0.0, at most 100 instances, greedy overlap removal (sorted by
+  `boxes.cls`, i.e. the class id, not the confidence, so the order is arbitrary), masks under 5 px dropped. 0.38 vs our
+  0.37 is inside the public-LB interval. Not adoptable: Ultralytics is AGPL (excluded), and in-sample weights cannot be
+  validated or blended out of fold. Signal: an instance-native detector at full resolution reaches our LB level, while
+  our Mask R-CNN (2026-11-03) reached only 0.377 OOF; a modern non-AGPL detector is the one family not tested well.
+
 Annotator identity: image ids carry a code such as `010401` (37 codes; the last two digits are the slot
 01-03 within an image, the first four look like an annotation batch). The test set has no such codes, so
 per-annotator heads could only be averaged at test time; not pursued.
