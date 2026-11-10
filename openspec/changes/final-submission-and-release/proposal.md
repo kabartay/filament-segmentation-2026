@@ -6,8 +6,8 @@ until the deadline because of copy risk.
 
 ## What Changes
 
-- Final selection on Kaggle: sub8 (`submissions/sub8_r34_1536_tree_stage2_ens.csv`, expected OOF 0.4399) and sub7 recommended;
-  the owner selects. Any later submission from `stage2-weighted-blends` / `stage2-uppj-refiner` is considered only
+- Final selection on Kaggle: the competition allows ONE final submission; sub8
+  (`submissions/sub8_r34_1536_tree_stage2_ens.csv`, OOF 0.4399, public LB 0.37), selected by the owner. Any later submission from `stage2-weighted-blends` / `stage2-uppj-refiner` is considered only
   if adopted by its paired OOF rule.
 - Report the LB rows (sub1..sub8 with public scores) in DESIGN and the report, labelled public LB (+-0.027), not evidence.
 - Make `kabartay/filament-segmentation-2026` public at or just after 2026-11-15 23:59 CDT, only when the owner asks:

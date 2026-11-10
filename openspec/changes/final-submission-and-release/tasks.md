@@ -1,7 +1,7 @@
 ## 1. Final selection
 
 - [ ] 1.1 Verify sub7 and sub8 CSVs are intact and pixel-disjoint; verify: overlap check script on `submissions/sub8_*.csv` and `submissions/sub7_*.csv` (0 shared pixels)
-- [ ] 1.2 Owner-gated: owner selects final submissions on Kaggle (sub8 + sub7 recommended); verify: owner confirms the selection on the Kaggle submissions page
+- [ ] 1.2 Owner-gated: owner selects the ONE final submission on Kaggle (sub8, the 2026-11-10 upload with its description); verify: the Submissions page no longer shows "Auto-selection candidates" and sub8 is ticked
 - [ ] 1.3 Report LB rows in DESIGN and the report; verify: `grep -n "LB" docs/DESIGN.md report/main.tex`
 
 ## 2. Release

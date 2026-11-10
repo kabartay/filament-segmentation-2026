@@ -485,8 +485,9 @@ Each entry: what we tried, the result, and what we decided.
   MPS (shared, loaded machine; submission 7 6.6 s). The expected LB change is +0.007, a quarter of the
   public-LB interval, so the LB may well show 0.37 again; the choice rests on the paired OOF gain.
   `pipeline.ipynb`, regenerated and executed on 2026-11-10, writes a CSV byte-identical to submission 8 (as it
-  did for submission 7 on 2026-11-08). Uploaded 2026-11-10: **public LB 0.37**. Final selection: submissions 8
-  and 7 (the owner selects on Kaggle).
+  did for submission 7 on 2026-11-08). Uploaded 2026-11-10: **public LB 0.37**. The competition allows ONE final
+  submission: submission 8 (the 2026-11-10 upload with its description; sub7 and sub8 were also re-uploaded once
+  without descriptions and score the same 0.37). If nothing is selected Kaggle auto-selects among the tied 0.37s.
 
 - **Adoption round from the public notebooks (2026-11-10, five explorer agents, one OpenSpec change each under
   `openspec/changes/adopt-*`)**: none adopted; numbers per change below. Weighted refiner blends (upp:jit 1:2, 1:3, 2:1;
