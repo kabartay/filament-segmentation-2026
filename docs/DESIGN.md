@@ -700,6 +700,15 @@ model diversity only if GPU budget allows.
   spherical morphology" in its title is not in the code. Nothing new; the 0.70 question stays parked
   (`openspec/changes/verify-lb070-pipeline`).
 
+- **"Solar Filament Pipelines: What Public Scores Show" (read 2026-11-10)**: a review notebook, no model. Useful facts:
+  the "LB 0.70" handoff notebook shows 0.70 on one Kaggle page snapshot and **0.34** on another; two 512 px U-Net
+  baselines display 0.93 and 0.90, and an incomplete submission with five empty masks scored 1.00, i.e. early scores
+  came from the defective evaluator. Together with our probe (empty masks 0.00 on 2026-11-04) this makes the 0.70 most
+  likely an artefact of the old scorer, and 0.34 is what a plain Mask R-CNN + crop refiner gets (ours: 0.377 OOF). It
+  states the competition data licence as CC BY-NC 4.0 (consistent with rules section 4, non-commercial). Its advice
+  (split by observation, compare U-Net + components with detector + refiner on one grouped validation, fix TTA and
+  rules before reading the LB) we already follow.
+
 Annotator identity: image ids carry a code such as `010401` (37 codes; the last two digits are the slot
 01-03 within an image, the first four look like an annotation batch). The test set has no such codes, so
 per-annotator heads could only be averaged at test time; not pursued.

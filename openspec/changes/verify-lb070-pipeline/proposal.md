@@ -31,3 +31,8 @@ conclusion about the design); near 0.4 means the design is not special.
 ## Cost
 
 Parked: 0 h. If resumed: about 8-12 h GPU on the shared M3 Max, one heavy job at a time, plus inference setup.
+
+## Update 2026-11-10
+A public review notebook found the same handoff notebook displaying 0.34 on another Kaggle page snapshot, while early
+leaderboard scores came from a defective evaluator (empty masks 1.00; 512 px U-Net baselines 0.90-0.93). The 0.70 is
+most likely an artefact of the old scorer; no reason left to reimplement the pipeline. Parked for good.
