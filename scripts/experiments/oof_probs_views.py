@@ -22,8 +22,11 @@ for f in range(5):
     model = build_model(run_encoder(run), pretrained=False).to(device)
     model.load_state_dict(torch.load(run / "best.pt", map_location=device))
     val = np.stack([np.array(images[k]) for k in val_idx])
-    check = predict(model, val[:3], device, views=2).astype(np.float32)
-    saved = np.load(run / "val_probs.npy", mmap_mode="r")[:3].astype(np.float32)
+    diff = "n/a (no val_probs.npy)"
+    if (run / "val_probs.npy").exists():  # optional check against the 2-view maps saved at training time
+        check = predict(model, val[:3], device, views=2).astype(np.float32)
+        saved = np.load(run / "val_probs.npy", mmap_mode="r")[:3].astype(np.float32)
+        diff = f"{np.abs(check - saved).max():.4f}"
     probs = predict(model, val, device, views=a.views)
     np.save(run / f"val_probs_v{a.views}.npy", probs)
-    print(f"fold {f}: {len(val_idx)} images, {time.time() - t0:.0f} s, 2-view check max |diff| {np.abs(check - saved).max():.4f}", flush=True)
+    print(f"fold {f}: {len(val_idx)} images, {time.time() - t0:.0f} s, 2-view check max |diff| {diff}", flush=True)

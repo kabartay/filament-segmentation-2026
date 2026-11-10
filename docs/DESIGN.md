@@ -561,6 +561,14 @@ Each entry: what we tried, the result, and what we decided.
   models of the `uppj` (UNet++ on the jitter crops, trained, never evaluated) and `negj` refiners (evaluated above).
   Fixes: the symlinks are untracked and `.gitignore` now ignores `/data` and `/runs` whether directory or link; agents
   must not commit them.
+- **Rebuild after the loss (2026-11-10, `runs/rebuild_1_download.sh`, `runs/rebuild_2_oof.sh`)**: competition data and
+  the HF cache downloaded again; 4-view OOF maps recomputed from the five stage-1 fold models (the 2-view check runs
+  only where `val_probs.npy` exists, folds 3-4: max |diff| 0.008 and 0.015); 12-level tree rebuilt (707 images, 72,712
+  nodes); hurdle eval at tau 0.26 gives PQ 0.4267 (per fold 0.434/0.425/0.411/0.430/0.434), the same as before;
+  stage-2 selection gives the same 4,429 crops (3,827 drawn); the `upp` and `jit` fold models restored from the
+  float16 copies in `weights/` predict their own folds' crops, and the `ensj` blend at 0.40 gives PQ 0.4399, SQ 0.6803,
+  RQ 0.6467, identical to the sub8 figures. The float16 conversion of the refiners costs nothing measurable. The
+  baseline for every later comparison (`ensj_pi:t0.40`) is therefore back in place.
 
 ## 6. Reference points from other entrants
 
