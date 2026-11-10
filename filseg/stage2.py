@@ -154,10 +154,17 @@ def crop_target(seed: np.ndarray, entries: list[list[dict]], frame: Frame,
     return np.clip(target * 255 + 0.5, 0, 255).astype(np.uint8), drew
 
 
-def build_refiner(arch: str = "Unet", encoder: str = "resnet34", pretrained: bool = True) -> torch.nn.Module:
-    """A segmentation network over the ``CHANNELS`` crop inputs."""
+def build_refiner(arch: str = "Unet", encoder: str = "resnet34", pretrained: bool = True,
+                  aux: bool = False) -> torch.nn.Module:
+    """A segmentation network over the ``CHANNELS`` crop inputs.
+
+    Args:
+        aux: add smp's pooled classification head (one logit: the predicted share of annotator entries that
+            drew the seed); the model then returns ``(mask_logits, drew_logit)``.
+    """
     return getattr(smp, arch)(encoder, encoder_weights="imagenet" if pretrained else None,
-                              in_channels=len(CHANNELS), classes=1)
+                              in_channels=len(CHANNELS), classes=1,
+                              aux_params=dict(classes=1, dropout=0.0) if aux else None)
 
 
 def to_tensor(x: np.ndarray) -> torch.Tensor:
@@ -168,19 +175,31 @@ def to_tensor(x: np.ndarray) -> torch.Tensor:
 
 
 @torch.no_grad()
-def predict_crops(models: list[torch.nn.Module], x: np.ndarray, device: str, batch: int = 32) -> np.ndarray:
-    """Mean sigmoid over models and 4 flips, (n, CROP_H, CROP_W) float32."""
+def predict_crops(models: list[torch.nn.Module], x: np.ndarray, device: str, batch: int = 32,
+                  return_aux: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Mean sigmoid over models and 4 flips, (n, CROP_H, CROP_W) float32.
+
+    With ``return_aux`` also the mean sigmoid of the models' drew-fraction head, (n,) float32 (models built
+    with ``aux=True``).
+    """
     out = np.zeros((len(x), CROP_H, CROP_W), np.float32)
+    aux_out = np.zeros(len(x), np.float32)
     views = [(), (-1,), (-2,), (-2, -1)]
     for lo in range(0, len(x), batch):
         t = to_tensor(x[lo:lo + batch]).to(device)
         acc = torch.zeros(t.shape[0], 1, CROP_H, CROP_W, device=device)
+        lab = torch.zeros(t.shape[0], device=device)
         for m in models:
             m.eval()
             for d in views:
-                acc += torch.sigmoid(m(t.flip(d))).flip(d) if d else torch.sigmoid(m(t))
+                o = m(t.flip(d)) if d else m(t)
+                if isinstance(o, (tuple, list)):
+                    o, a = o
+                    lab += torch.sigmoid(a)[:, 0]
+                acc += torch.sigmoid(o).flip(d) if d else torch.sigmoid(o)
         out[lo:lo + batch] = (acc / (len(models) * len(views)))[:, 0].float().cpu().numpy()
-    return out
+        aux_out[lo:lo + batch] = (lab / (len(models) * len(views))).float().cpu().numpy()
+    return (out, aux_out) if return_aux else out
 
 
 def refiner_arch(state: dict) -> str:
@@ -231,7 +250,7 @@ def refine(models: list[torch.nn.Module], image: np.ndarray, prob: np.ndarray, r
 
 
 def paste_back(seeds: list[np.ndarray], refined: list[np.ndarray | None], score: np.ndarray,
-               t_pix: float = T_PIX) -> list[np.ndarray]:
+               t_pix: float = T_PIX, drop_erased: bool = False) -> list[np.ndarray]:
     """Disjoint final masks of one image.
 
     Args:
@@ -239,6 +258,8 @@ def paste_back(seeds: list[np.ndarray], refined: list[np.ndarray | None], score:
         refined: per seed, its (SIZE, SIZE) refined probability, or None to keep the seed.
         score: stage-1 scores; the lower-scored of two seeds is absorbed first.
         t_pix: pixel threshold of the refined probability.
+        drop_erased: a seed whose refined mask is empty is dropped instead of kept as stage 1 drew it (for
+            refiners trained on undrawn seeds, which learn to erase them).
 
     Returns:
         boolean masks, one per surviving instance, pairwise disjoint.
@@ -258,7 +279,10 @@ def paste_back(seeds: list[np.ndarray], refined: list[np.ndarray | None], score:
         touch = np.unique(lab[s & m])
         touch = touch[touch > 0]
         m = np.isin(lab, touch) if len(touch) else np.zeros_like(m)
-        if m.sum() == 0:  # the refiner erased the seed: keep stage 1's mask
+        if m.sum() == 0 and drop_erased:
+            prob.append(np.zeros(s.shape, np.float32))
+            masks.append(np.zeros_like(s))
+        elif m.sum() == 0:  # the refiner erased the seed: keep stage 1's mask
             prob.append(s.astype(np.float32))
             masks.append(s.copy())
         else:
