@@ -455,6 +455,12 @@ Each entry: what we tried, the result, and what we decided.
   interval [0.4290, 0.4473], over stage 1 +0.0116 [0.0089, 0.0144]. Paired against the submitted U-Net
   refiner +0.0054 [0.0030, 0.0080] (5/5 folds); against the U-Net + UNet++ blend +0.0023 [0.0000, 0.0047]
   (4/5). The larger, harder training set helps more than a second architecture.
+- **Kaggle CPU as a training host (2026-11-10, `scripts/kaggle/cpu_probe/`, private kernel
+  muhakabartay/filseg-cpu-probe)**: 4 cores of a Xeon @ 2.20 GHz, 31 GB RAM, torch 2.11 CPU with 2 threads.
+  One refiner training step (batch 32, 4 x 128 x 384, ResNet-34): U-Net 13.7 s, UNet++ 32.7 s, i.e. about 15 h
+  (U-Net) and 35 h (UNet++) per 15-epoch fold against 28-36 / about 55 min on the local MPS, so 25-40x slower
+  and over the 12 h session limit. Not used for training; it could take CPU-only jobs (crop building, tree
+  builds, evaluations), none of which is the bottleneck now.
 - **Refiner blends with the jitter model (2026-11-09, threshold 0.40, paired over the same resamples)**:
   | refiners | OOF PQ | vs sub7 refiner | vs U-Net+UNet++ |
   |---|---|---|---|
