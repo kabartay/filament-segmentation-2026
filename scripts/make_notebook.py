@@ -13,8 +13,8 @@ md(r"""
 
 Kaggle *Solar Filament Segmentation Challenge 2026* (MAGFiLO, GONG H-alpha, 2048 x 2048 px).
 This notebook reproduces the submitted predictions from the raw test images and the weights stored in
-this repository (`weights/unet_r34_1536_all.pt`, `weights/tree_scorer_1536.pkl` and the five stage-2 refiners
-`weights/stage2_unet_f{0..4}.pt`); no training is needed. Training, tuning and the
+this repository (`weights/unet_r34_1536_all.pt`, `weights/tree_scorer_1536.pkl` and the ten stage-2 refiners
+`weights/stage2_upp_f{0..4}.pt` and `weights/stage2_jit_f{0..4}.pt`); no training is needed. Training, tuning and the
 validation study are described at the end and can be re-run with the commands given there.
 
 **Pipeline in one line:** downsample to 1536 px -> U-Net (ResNet-34 encoder, 1 input channel), averaged
@@ -24,8 +24,8 @@ least 100 px), which nest into a tree -> a gradient-boosted hurdle model scores 
 contribution, P(match) x E[IoU | match], from 32 shape, probability, contrast, position, tree-context and
 view-spread features -> the disjoint set of nodes maximising the sum of (score - 0.26), solved exactly on the
 tree -> stage 2: each selected filament redrawn at native resolution in a crop turned along its own axis
-(384 x 128 px; inputs image, stage-1 probability, the filament and its neighbours) by five refiner U-Nets,
-averaged, thresholded at 0.40 and pasted back disjoint -> one compressed COCO RLE per filament.
+(384 x 128 px; inputs image, stage-1 probability, the filament and its neighbours) by ten refiners
+(five UNet++ and five U-Nets trained with extra crops from other tree levels), averaged, thresholded at 0.40 and pasted back disjoint -> one compressed COCO RLE per filament.
 
 Every design choice, with the experiments behind it (including the failed ones), is in `docs/DESIGN.md`.
 """)
@@ -53,7 +53,7 @@ from filseg.tree import load_tree_scorer
 DEVICE = os.environ.get("FILSEG_DEVICE") or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 WEIGHTS = ROOT / "weights" / "unet_r34_1536_all.pt"
 TREE = load_tree_scorer(ROOT / "weights" / "tree_scorer_1536.pkl")
-REFINERS = [ROOT / "weights" / f"stage2_unet_f{k}.pt" for k in range(5)]
+REFINERS = [ROOT / "weights" / f"stage2_{tag}_f{k}.pt" for tag in ("upp", "jit") for k in range(5)]
 OUTPUT = ROOT / "submissions" / "notebook_submission.csv"
 RES = 1536  # network input resolution
 print("device:", DEVICE, "| test images:", TEST_IMAGES.relative_to(ROOT))
@@ -77,9 +77,11 @@ md(r"""
 input channel, trained on all 707 training images at 1536 px for 40 epochs (BCE + soft Dice on the consensus
 target: the fraction of annotators marking each pixel). The tree scorer (scikit-learn
 HistGradientBoostingClassifier and Regressor, a hurdle model) was fitted on the out-of-fold tree nodes of
-five fold models. The stage-2 refiners are U-Nets (ResNet-34 encoder, 4 input channels), one per fold,
-each trained for 30 epochs on the other folds' crops with the mean of the matching annotators' masks as the
-target, stored in float16. All are loaded here; nothing is trained.
+five fold models. The stage-2 refiners (ResNet-34 encoder, 4 input channels, one per fold and architecture)
+are trained on the other folds' crops with the mean of the matching annotators' masks as the target: five
+UNet++ for 30 epochs on the crops of the selected filaments, and five U-Nets for 15 epochs on those crops plus
+crops of tree nodes at other thresholds, with flips and a small affine jitter. The two kinds are averaged;
+the architecture of each checkpoint is read from its keys. Stored in float16. All are loaded here; nothing is trained.
 """)
 code(r"""
 model = build_model("resnet34", pretrained=False).to(DEVICE)
@@ -156,8 +158,8 @@ nodes. Numbers are printed from `docs/figures/ooftree_stats.json`; the plots are
 reference, one annotator scored against another on the same images gives PQ 0.340, the single-threshold
 scorer 0.422 and the earlier 1024 px pipeline with a fixed rule 0.409. These plots are of stage 1 (OOF PQ
 0.4267). Stage 2, evaluated out of fold the same way (each fold's crops redrawn by the refiner that did not
-see them), gives 0.4330, a paired gain of +0.0063 (bootstrap 95% interval 0.0033 to 0.0093;
-`runs/stage2/unet_eval.json`, `scripts/experiments/stage2_oof.py`).
+see them), gives 0.4399, a paired gain of +0.0132 (bootstrap 95% interval 0.0104 to 0.0160;
+`runs/stage2/ensj_pi.json`, `scripts/experiments/stage2_oof.py`).
 """)
 code(r"""
 stats = json.loads((ROOT / "docs" / "figures" / "ooftree_stats.json").read_text())
@@ -187,10 +189,13 @@ Set `RUN_TRAINING = True` below to run the final-model steps from the notebook.
 | Evaluation plots | `python -m filseg.report --tree runs/oof_tree12s_1536_v4.pkl --tau 0.26 --name ooftree` |
 | Final model on all 707 images | `python -m filseg.train --fold -1 --name unet_r34_1536 --epochs 40` |
 | Stage-2 crops from the out-of-fold selections | `python scripts/experiments/stage2_oof.py crops --workers 4` |
-| Stage-2 refiners, one per fold, and their out-of-fold crops | `python scripts/experiments/stage2_oof.py train --tag unet --epochs 30` |
-| Stage-2 out-of-fold PQ against stage 1 | `python scripts/experiments/stage2_oof.py eval --tag unet --workers 4` |
-| Refiners to float16 in `weights/` | `python scripts/experiments/stage2_oof.py export --tag unet` |
-| Submission from the command line | `python -m filseg.predict --weights weights/unet_r34_1536_all.pt --views 4 --tree-scorer weights/tree_scorer_1536.pkl --refiner weights/stage2_unet_f0.pt weights/stage2_unet_f1.pt weights/stage2_unet_f2.pt weights/stage2_unet_f3.pt weights/stage2_unet_f4.pt` |
+| Stage-2 UNet++ refiners, one per fold, and their out-of-fold crops | `python scripts/experiments/stage2_oof.py train --tag upp --arch UnetPlusPlus --epochs 30` |
+| Extra crops from tree nodes at other thresholds | `python scripts/experiments/stage2_oof.py jitter --workers 4` |
+| Stage-2 U-Net refiners with the extra crops and augmentation | `python scripts/experiments/stage2_oof.py train --tag jit --extra jit --aug --epochs 15` |
+| Average of the two refiners' out-of-fold crops | `python scripts/experiments/stage2_oof.py blend --tag ensj --blend upp,jit` |
+| Stage-2 out-of-fold PQ against stage 1 | `python scripts/experiments/stage2_oof.py eval --tag ensj --workers 4` |
+| Refiners to float16 in `weights/` | `python scripts/experiments/stage2_oof.py export --tag upp` and `--tag jit` |
+| Submission from the command line | `python -m filseg.predict --weights weights/unet_r34_1536_all.pt --views 4 --tree-scorer weights/tree_scorer_1536.pkl --refiner weights/stage2_upp_f*.pt weights/stage2_jit_f*.pt` |
 """)
 code(r"""
 RUN_TRAINING = False

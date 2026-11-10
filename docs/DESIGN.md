@@ -26,7 +26,7 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 | Instances per image (median) | 7 | |
 | Instance area, 5th-95th percentile | 316 to 6963 px | Sets the range for the minimum-area filter |
 
-## 3. Pipeline (current, submission 7 candidate, 2026-11-08)
+## 3. Pipeline (current, submission 8 candidate, 2026-11-09)
 
 1. **Cache** (`filseg/cache.py`): images area-downsampled to 1536 px; target = fraction
    of annotators marking each pixel, computed at 2048 then downsampled.
@@ -45,14 +45,18 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
    72,712 out-of-fold nodes, rows weighted by annotator count); exact antichain maximising sum(score - 0.26).
    Disjoint by construction (checked on the submission: 0 overlapping pairs).
 7. **Stage 2** (`filseg/stage2.py`, `--refiner`): each selected instance redrawn in a 384x128 crop along its
-   principal axis by the five fold refiners (`weights/stage2_unet_f{0..4}.pt`, float16) and four flips,
-   threshold 0.40, pasted back disjoint (see the stage-2 entry in section 5).
+   principal axis by ten refiners and four flips: five UNet++ (`weights/stage2_upp_f{0..4}.pt`) and five
+   U-Nets trained with extra crops from other tree levels and augmentation (`weights/stage2_jit_f{0..4}.pt`),
+   float16, architecture read from the checkpoint keys; threshold 0.40, pasted back disjoint (see the
+   stage-2, blend and jitter entries in section 5). Submission 7 used the five plain U-Nets
+   (`weights/stage2_unet_f{0..4}.pt`).
 8. **Submission** (`filseg/predict.py --tree-scorer --refiner`): writes and validates the CSV (unique ids, known
    stems, non-empty 2048 masks), records runtime per image. `pipeline.ipynb` reproduces it.
 
-With stage 2, out of fold: PQ 0.4330 [0.423, 0.442], SQ 0.677, RQ 0.639; per fold 0.433 +- 0.009; multi-annotator
-images 0.434 (SQ 0.674, RQ 0.644); +0.0063 [0.0033, 0.0093] over stage 1, all five folds. Stage 1 alone (the
-submission-6 pipeline):
+With stage 2 (submission 8 refiners), out of fold: PQ 0.4399 [0.4305, 0.4487], SQ 0.680, RQ 0.647; per fold
+0.440 +- 0.009; multi-annotator images 0.441; +0.0132 [0.0104, 0.0160] over stage 1 and +0.0070 [0.0050, 0.0090]
+over the submission-7 refiners, all five folds. Submission 7 (one U-Net refiner per fold): 0.4330 [0.423, 0.442],
+SQ 0.677, RQ 0.639, public LB 0.37. Stage 1 alone (the submission-6 pipeline):
 
 Out of fold: PQ 0.4267 [0.417, 0.436]; +0.0049 [0.0012, 0.0085] over submission 5 (single threshold +
 scorer, 0.4219) and +0.0182 [0.0134, 0.0233] over submission 4 (1024 px hand rule, 0.4086); per fold
@@ -439,6 +443,41 @@ Each entry: what we tried, the result, and what we decided.
   [-0.0008, 0.0020] (4/5). Unlike the stage-1 ensembles, the second architecture helps here: SQ and RQ both
   rise. The blend is kept over UNet++ alone for its tighter interval. Per-image results:
   `runs/stage2/{unet,upp,ens}_pi_per_image.npz`.
+- **Jitter refiner (2026-11-09, `stage2_oof.py jitter`, then `train --tag jit --extra jit --aug --epochs 15`)**:
+  extra training crops from tree nodes at other levels than the selected one, so the refiner also sees
+  fragments and seeds cut at other thresholds. A node is used when it matches an annotator entry by IoU > 0.3
+  or lies at least half inside it (containment 0.5); nodes are deduplicated at IoU 0.85 and capped at 4 per
+  seed. 6,610 extra crops from 670 images (17.5 h CPU on 3 workers, under load), on top of the 4,429 base
+  crops; each fold trains on the base and extra crops of the other four folds (8,234-8,495 crops) and is
+  evaluated only on its own base crops, as before. Per-sample flips plus a small affine jitter (rotation
+  +-10 deg, scale 0.9-1.1, shift +-10 px), ResNet-34 U-Net, 15 epochs (about 1.2x the base steps), 28-36 min
+  per fold. OOF at 0.35 / **0.40** / 0.45: 0.4375 / **0.4383** / 0.4381; at 0.40 SQ 0.6792, RQ 0.6454, PQ
+  interval [0.4290, 0.4473], over stage 1 +0.0116 [0.0089, 0.0144]. Paired against the submitted U-Net
+  refiner +0.0054 [0.0030, 0.0080] (5/5 folds); against the U-Net + UNet++ blend +0.0023 [0.0000, 0.0047]
+  (4/5). The larger, harder training set helps more than a second architecture.
+- **Refiner blends with the jitter model (2026-11-09, threshold 0.40, paired over the same resamples)**:
+  | refiners | OOF PQ | vs sub7 refiner | vs U-Net+UNet++ |
+  |---|---|---|---|
+  | U-Net (sub7) | 0.4330 | -- | -0.0031 |
+  | U-Net + UNet++ | 0.4360 | +0.0031 [0.0016, 0.0044], 5/5 | -- |
+  | jitter U-Net | 0.4383 | +0.0054 [0.0030, 0.0080], 5/5 | +0.0023 [0.0000, 0.0047], 4/5 |
+  | U-Net + UNet++ + jitter | 0.4391 | +0.0061 [0.0046, 0.0077], 5/5 | +0.0030 [0.0020, 0.0042], 5/5 |
+  | **UNet++ + jitter** | **0.4399** | **+0.0070 [0.0050, 0.0090], 5/5** | +0.0039 [0.0025, 0.0055], 5/5 |
+
+  UNet++ + jitter against the jitter model alone +0.0016 [-0.0002, 0.0034] (5/5 folds), against the three-way
+  blend +0.0009 [-0.0001, 0.0019] (5/5), against stage 1 +0.0132 [0.0104, 0.0160]. At 0.40: PQ 0.4399 [0.4305,
+  0.4487], SQ 0.6803, RQ 0.6467, per fold 0.4415, 0.4379, 0.4265, 0.4479, 0.4460; multi-annotator images
+  0.4406. Chosen for submission 8: it is best on every fold among five candidates, and its margin over the
+  runner-up is small, so the choice among blends barely matters; the gain over sub7 does not depend on it.
+  The old U-Net refiner adds nothing once the jitter model is in. A UNet++ trained on the jitter crops was not
+  tried (no time before the deadline).
+- **Submission 8 candidate (2026-11-10, `submissions/sub8_r34_1536_tree_stage2_ens.csv`)**: submission 7 with
+  the ten refiners `weights/stage2_upp_f{0..4}.pt` + `weights/stage2_jit_f{0..4}.pt` (float16, 52 / 49 MB each)
+  instead of the five plain U-Nets; `load_refiners` now reads each checkpoint's architecture from its keys.
+  1,065 filaments on 177 of 180 images (submission 7: 1,066), no overlapping pixels; against submission 7 the
+  median best-match IoU is 0.964, 12 masks below 0.8 and 1 below 0.5, total area +0.2%. 15.9 s per image on
+  MPS (shared, loaded machine; submission 7 6.6 s). The expected LB change is +0.007, a quarter of the
+  public-LB interval, so the LB may well show 0.37 again; the choice rests on the paired OOF gain.
 
 ## 6. Reference points from other entrants
 

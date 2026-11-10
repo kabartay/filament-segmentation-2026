@@ -183,12 +183,25 @@ def predict_crops(models: list[torch.nn.Module], x: np.ndarray, device: str, bat
     return out
 
 
-def load_refiners(paths: list, device: str, arch: str = "Unet", encoder: str = "resnet34") -> list[torch.nn.Module]:
-    """Refiner checkpoints (float16 or float32 state dicts) as float32 models in eval mode."""
+def refiner_arch(state: dict) -> str:
+    """Architecture of a refiner state dict: UNet++ decoders name their blocks ``x_<i>_<j>``."""
+    return "UnetPlusPlus" if any(k.startswith("decoder.blocks.x_") for k in state) else "Unet"
+
+
+def load_refiners(paths: list, device: str, arch: str | None = None,
+                  encoder: str = "resnet34") -> list[torch.nn.Module]:
+    """Refiner checkpoints (float16 or float32 state dicts) as float32 models in eval mode.
+
+    Args:
+        paths: checkpoint files; U-Net and UNet++ refiners may be mixed.
+        device: torch device.
+        arch: force one architecture; by default each checkpoint's is read from its keys (``refiner_arch``).
+        encoder: encoder name shared by all refiners.
+    """
     models = []
     for p in paths:
-        m = build_refiner(arch, encoder, pretrained=False)
         state = torch.load(p, map_location="cpu")
+        m = build_refiner(arch or refiner_arch(state), encoder, pretrained=False)
         m.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in state.items()})
         models.append(m.to(device).eval())
     return models
