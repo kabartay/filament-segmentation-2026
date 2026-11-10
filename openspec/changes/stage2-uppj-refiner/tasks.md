@@ -1,4 +1,4 @@
-## 1. Training (running)
+## 1. Training (first run lost with runs/ on 2026-11-10; retraining via runs/rebuild_3_uppj.sh, log runs/rebuild_3.out)
 
 - [ ] 1.1 Five folds finish; verify: `tail runs/stage2/uppj_train.out` and `ls runs/stage2/uppj_f*.pt` (5 files)
 - [ ] 1.2 Per-fold and pooled OOF evaluation; verify: `PYTHONPATH=. FILSEG_CACHE=data/cache1536 .venv/bin/python scripts/experiments/stage2_oof.py eval --tag uppj --thresholds 0.35,0.40,0.45 --name pi --workers 3` writes `runs/stage2/uppj_pi.json` and `uppj_pi_per_image.npz`
