@@ -488,6 +488,79 @@ Each entry: what we tried, the result, and what we decided.
   did for submission 7 on 2026-11-08). Uploaded 2026-11-10: **public LB 0.37**. Final selection: submissions 8
   and 7 (the owner selects on Kaggle).
 
+- **Adoption round from the public notebooks (2026-11-10, five explorer agents, one OpenSpec change each under
+  `openspec/changes/adopt-*`)**: none adopted; numbers per change below. Weighted refiner blends (upp:jit 1:2, 1:3, 2:1;
+  upp:jit:unet 1:2:1, 2:3:1; thresholds 0.35/0.40/0.45, 15 variants, paired against submission 8's equal blend
+  0.4399): all at or below it (best w12 and w231 at 0.40, -0.0001; worst w21 at 0.35, -0.0017 [-0.0031, -0.0003]);
+  equal weights kept (`openspec/changes/stage2-weighted-blends`). Independent review of the submission-8 code path
+  (`openspec/changes/review-sub8-code-path`): no defect that changes submission 8 or its OOF numbers; `predict` now
+  warns when the cache is not 1536 px and records `cache_res` (output unchanged); fold checkpoints were selected on their
+  own validation fold, worth at most 0.0018 on one fold of five (stage-1 hand-rule PQ); the jitter refiner's affine
+  augmentation pads the image channel with 0 instead of the crop border (train-only mismatch, OOF unaffected).
+- **Selection threshold under sparser test labels (2026-11-10, `scripts/experiments/adopt_tau_sparse_labels.py`,
+  runs/adopt-tau-sparse-labels_stage1.json; REJECTED, keep 0.26)**: following the public notebooks' reading of the
+  OOF-to-LB gap (test labels hold a fraction r of what a training annotator draws; dariushafshar fits r = 0.77), the
+  cross-validated stage-1 selections at tau 0.22-0.36 were scored at r = 1, 0.85, 0.77, 0.65, in closed form and by a
+  simulation dropping each ground-truth instance with probability 1 - r (20 seeds). MEASURED, stage 1, OOF on 707
+  images. At r = 1: 0.4253 / 0.4265 / 0.4267 / 0.4269 / 0.4262 / 0.4258 / 0.4238 / 0.4223 for tau 0.22 ... 0.36; at
+  r = 0.77: 0.3720 / 0.3736 / 0.3744 / 0.3752 / 0.3752 / 0.3756 / 0.3745 / 0.3740. Worst-case regret over r:
+  0.0052 / 0.0035 / 0.0024 / 0.0011 / 0.0008 / 0.0011 / 0.0032 / 0.0046 (simulation seed SD about 0.0007). The
+  minimax tau is 0.30, but its edge over 0.26 is at most about 0.002 under sparse labels and -0.0005 at r = 1, r is
+  unknown, and stage 2 would have to be re-run on the new selection; kept 0.26. The direction agrees with the theory
+  (sparser labels raise the break-even score), the size does not justify a change before the deadline.
+- 2026-11-10, stage 2 paste-back, one connected piece per instance (change `adopt-paste-back-one-piece`). Idea from
+  tushhaaarrrr's notebook (6% of refined instances in 2-4 pieces; largest-piece only -0.0023; corridor join 0.4600 vs
+  0.4597). MEASURED on the submission 8 blend (`ensj`, threshold 0.40, OOF, 707 images): after paste-back 329 of 4,417
+  instances (7.45%) are more than one 8-connected piece (259 with 2, 52 with 3, 13 with 4, 5 with 5 or more). The share
+  rises with size: 0.3% under 500 px (1 of 310), 5.5% for 500-2,000 px (147 of 2,653), 12.1% for 2,000-8,000 px (162 of
+  1,336), 16.1% above 8,000 px (19 of 118). Three variants against `ensj_pi:t0.40` (PQ 0.43993, SQ 0.6803, RQ 0.6467,
+  multi-annotator subset 0.4406 on 296 images), paired bootstrap over images, 2,000 resamples:
+  `largest` (keep the largest piece) PQ 0.44027, gain +0.00035 (95% CI -0.00157 to +0.00236), per fold +0.0003, -0.0002,
+  -0.0000, +0.0017, -0.0002, SQ 0.6811, RQ 0.6464, multi-annotator PQ 0.4410; `join` (3 px corridors on a minimum spanning
+  tree of nearest-pixel gaps, free pixels only, gaps over 40 px left unbridged) PQ 0.43943, gain -0.00050 (-0.00094 to
+  -0.00013), all five folds negative (-0.0006, -0.0006, -0.0006, -0.0005, -0.0003), SQ 0.6802, RQ 0.6461, multi-annotator
+  PQ 0.4400, 12 instances stay multi-piece; `join_drop` (as `join`, then keep the largest piece) PQ 0.43974, gain
+  -0.00019 (-0.00081 to +0.00055), per fold +0.0007, -0.0003, -0.0006, -0.0005, -0.0003, SQ 0.6802, RQ 0.6464,
+  multi-annotator PQ 0.4403. Verdict: not adopted. Joining costs 0.0005 PQ (interval excludes 0, all folds negative);
+  `largest` is +0.00035, inside noise (interval spans -0.0016 to +0.0024), so it does not justify changing the submitted
+  pipeline. Default stays `single=""`; the flag remains in the code.
+- 2026-11-10, adopt-scorer-features (tushhaaarrrr ideas on the stage-1 tree scorer). MEASURED, OOF on 707 images, scorer refitted per fold on the other four, paired bootstrap over images (2000 resamples) against the baseline selection, 10 variants tried; none won, so selection optimism does not arise. Baseline reproduced: PQ 0.4265 / 0.4267 / 0.4269 at tau 0.24 / 0.26 / 0.28. Capacity (hurdle HistGradientBoosting leaves): 15 leaves 0.4252 / 0.4262 / 0.4257 (diff at tau 0.26 -0.0005, 95% [-0.0028, +0.0018], 2/5 folds); 15 leaves with the regressor kept at 31: 0.4264 / 0.4266 / 0.4263 (-0.0001); 7 leaves 0.4266 / 0.4266 / 0.4263 (-0.0001, [-0.0026, +0.0025]). No capacity variant is positive at any tau on >= 4/5 folds with an interval above 0. Observing station (one-hot of the stem's trailing code Bh/Ch/Lh/Mh/Th/Uh; the same six codes exist in train, 102-127 images each, and test, 26-34 each): 0.4234 / 0.4240 / 0.4236 (-0.0027 at tau 0.26, [-0.0049, -0.0006], 1/5 folds); it hurts. Neighbour features (count, summed area and max probability of same-level nodes of other tree branches within 150 and 400 px at 2048, plus nearest distance; 9 features): 0.4245 / 0.4250 / 0.4242 (-0.0018 at tau 0.26, [-0.0046, +0.0010], 3/5 folds; -0.0028 at tau 0.28, 1/5 folds). Combinations: station+nb 0.4241 (-0.0026), 15 leaves+nb 0.4253 (-0.0014), 15 leaves+station+nb 0.4249 (-0.0018), 15 leaves+station 0.4243 (-0.0024). Every variant is at or below the baseline. "Rich descriptors" were not tested (they need a feature bank we do not have; the notebook's +0.0030 is confounded with a third ensemble member). Verdict: reject; stage 2 needs nothing. Spread parity (SUBSAMPLE, 50 training images, 10 per fold, all-data model in-sample vs saved fold-model OOF spread): whole-image mean spread 0.00033 vs 0.00032 (ratio 1.007); over pixels with probability > 0.3 the median per-image ratio is 1.007, per-image log-ratio SD 0.30, pixel-wise correlation 0.65. Test images (30 sampled, all-data model) have mean spread 0.000359 vs 0.000323 for OOF train (+11%; medians 0.000358 vs 0.000279), consistent with image mix. No systematic scale mismatch, only per-image noise; no evidence that test-time scores are biased. Files: scripts/experiments/adopt_scorer_features.py, adopt_spread_parity.py; runs/adopt-scorer-features_{eval_nonb,eval,parity}.json.
+- **15-level tree, thresholds 0.10-0.80 (2026-11-10, runs/adopt-low-tree-levels_tree15s.pkl; REJECTED)**: tushhaaarrrr's
+  notebook states "15 levels 0.05-0.80" with "finer levels +0.0025" (step 0.05 would give 16 values; their exact grid is
+  not stated). We built levels 0.10, 0.15, 0.20, 0.25, ..., 0.80 (15 levels, view-spread features; 707 images, 92,376
+  nodes, 15,038 s on 3 workers under heavy machine load) and ran the cross-validated hurdle with context features
+  (`component_tree.py eval --context --modes hurdle`, MEASURED, OOF on all 707 images). Variants tried: one (the 14-level
+  0.15-0.80 variant was not run because the first result was negative at every tau). PQ by tau: 0.22 0.4199, 0.24 0.4208,
+  0.26 0.4217, 0.28 0.4221, 0.30 0.4230, 0.32 0.4224, against the 12-level tree at 0.4253 / 0.4265 / 0.4267 / 0.4269 /
+  0.4262 (tau 0.22 / 0.24 / 0.26 / 0.28 / 0.30). At the submitted tau 0.26 the change is -0.0050 PQ, and it is negative
+  on 5/5 folds (15-level vs 12-level, fold 0-4: 0.4301/0.4184/0.4029/0.4250/0.4325 vs 0.4340/0.4247/0.4107/0.4304/0.4341).
+  Even at its best tau (0.30) the 15-level tree is 0.0032 below the 12-level best. At tau 0.26 TP 4,833 / FP 2,440 / FN
+  3,366 against 4,872 / 2,341 / 3,327: the extra low-level candidates cost true positives and add false positives. The
+  selection does use the low levels (tau 0.22: 697 of 5,709 selected nodes at 0.10-0.20: 277, 152, 268) but they do not
+  pay. Against the level-0.45 control the 15-level hurdle is -0.0002 at tau 0.26 (95 % CI -0.0042 to +0.0036), while the 12-level
+  tree is +0.0049 (CI +0.0012 to +0.0085): the gain of the 12-level tree over the control is lost. Verdict: low levels
+  hurt; keep 12 levels 0.25-0.80. Note: `component_tree.py eval` shadows `levels` inside the tau loop, so level counts
+  in the json are correct only for the first tau (0.22); later taus print zeros (not fixed, unrelated to the verdict).
+- **2026-11-10, refiners trained with undrawn seeds (`--negatives`) and a drew-fraction head (tag `negj`).** All numbers MEASURED, OOF on 707 images, 5-fold, paired bootstrap over images (2000 resamples). Recipe of jit_pi (U-Net, `--extra jit --aug --epochs 15`) plus: the 602 undrawn base seeds with all-zero targets at loss weight 0.5 (no jitter negatives: the jitter extraction costs about 17.5 h CPU and was not rebuilt, so every jit crop is a drawn node), and an smp pooled head predicting drew / entries of the image, loss weight 0.1. Training 06:45 to 09:05 (about 28 min per fold on the GPU).
+
+  - negj alone, t0.40: PQ 0.4405 against jit_pi 0.4383: +0.0022 (95% CI +0.0004, +0.0040), per fold +0.0040, +0.0007, +0.0022, +0.0021, +0.0020 (5 of 5 positive). Our ESTIMATED +0.003 was not reached.
+  - Blend upp+negj against ensj_pi:t0.40 (0.4399): PQ 0.4404, +0.0005 (CI -0.0005, +0.0015), per fold +0.0007, 0.0000, -0.0009, +0.0011, +0.0015 (3 of 5). Inconclusive; no gain over the submitted ensemble.
+  - Erasing: dropping a seed whose refined mask is empty instead of keeping stage 1's mask changes nothing in either comparison (identical PQ): the refiner never erases a seed even with negatives, so it learns to keep the shape rather than to remove it.
+  - Drew head: AUC for separating TP from FP stage-1 seeds 0.730 (per fold 0.714 to 0.751; 4429 seeds, 75.3% TP), against 0.598 for the refiner's own peak probability here and 0.63 in the earlier analysis. Correlation with the true drew fraction 0.36. Its output is high for most seeds (percentiles 5/20/50: 0.72/0.85/0.95).
+  - Dropping instances below a predicted drew fraction (negj, t0.40), PQ by cut-off: 0.65: 0.4408; 0.75: 0.4384; 0.80: 0.4352; 0.85: 0.4259; 0.90: 0.4069; cut-offs 0.05 to 0.30 drop nothing (0.4405). Nested by fold the choice was 0.65 in 3 folds and no drop in 2, PQ 0.4402, gain -0.0003 (CI -0.0013, +0.0006). No gain.
+
+  Verdict: reject for the submission (no gain over ensj, drop filter no gain). As a single refiner negatives help slightly and consistently (+0.0022), so they are worth keeping if the ensemble is ever retrained; not tested with jitter negatives.
+- **Lost local artefacts (2026-11-10 ~11:00)**: merging an agent branch that had committed `data` and `runs` as
+  symlinks made git replace the ignored `data/` and `runs/` directories of the main checkout, deleting their contents
+  (about 40 GB: competition download, caches, OOF maps, trees, stage-2 crops, OOF crop predictions, refiner fold
+  models). No local snapshot existed. Safe: everything tracked (code, `weights/`, report, notebook, docs, OpenSpec) and
+  `submissions/`. Recoverable: the private HF dataset holds the 1536 px training cache, the annotations, the five
+  stage-1 fold models with their view-spread maps and the all-data model; `weights/` holds float16 copies of the
+  U-Net, UNet++ and jitter refiner fold models; the competition data can be downloaded again. Lost for good: the fold
+  models of the `uppj` (UNet++ on the jitter crops, trained, never evaluated) and `negj` refiners (evaluated above).
+  Fixes: the symlinks are untracked and `.gitignore` now ignores `/data` and `/runs` whether directory or link; agents
+  must not commit them.
+
 ## 6. Reference points from other entrants
 
 | Source | Method | Local PQ | LB |
