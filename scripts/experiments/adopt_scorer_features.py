@@ -57,7 +57,7 @@ def _centroids(item: tuple[int, str]) -> tuple[str, np.ndarray]:
         for c in components(full, lv, CANDIDATE_CLOSE_PX, disk, min_area=CANDIDATE_MIN_AREA):
             ys, xs = np.nonzero(mask_util.decode(c.rle))
             rows.append([xs.mean(), ys.mean(), c.area, disk.cx, disk.cy, disk.r])
-    return s, np.array(rows)
+    return s, np.array(rows).reshape(-1, 6)
 
 
 def build_centroids(workers: int, limit: int = 0) -> None:
@@ -66,10 +66,10 @@ def build_centroids(workers: int, limit: int = 0) -> None:
     with ProcessPoolExecutor(workers, initializer=_init) as ex:
         res = dict(ex.map(_centroids, [(d["fold"], d["stem"]) for d in data], chunksize=2))
     bad = [d["stem"] for d in data
-           if not np.allclose(res[d["stem"]][:, 2], [ft["area"] for ft in d["feats"]])]
+           if len(res[d["stem"]]) != len(d["feats"])
+           or not np.allclose(res[d["stem"]][:, 2], [ft["area"] for ft in d["feats"]])]
     print(f"{len(res)} images, area mismatches: {len(bad)} {bad[:5]}")
-    if not limit:
-        pickle.dump(res, open(CENT, "wb"))
+    pickle.dump(res, open(CENT if not limit else CENT.with_suffix(".smoke.pkl"), "wb"))
 
 
 # ---------------------------------------------------------------- features
@@ -210,6 +210,8 @@ def evaluate(taus: tuple[float, ...], nb_off: bool = False) -> None:
     }
     if nb_off:
         variants = {k: v for k, v in variants.items() if "nb" not in k and "neighbours" not in k}
+    else:  # the no-neighbour variants are in the --no-nb json; keep only the baseline and neighbour ones
+        variants = {k: v for k, v in variants.items() if k == "base" or "nb" in k or "neighbours" in k}
     pi = {}
     for name, (names, lv, rl) in variants.items():
         sc = cv_scores(data, names, lv, rl)
