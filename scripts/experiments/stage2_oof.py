@@ -34,6 +34,7 @@ import argparse
 import json
 import pickle
 import time
+from functools import partial
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -49,7 +50,7 @@ from filseg.metric import PQCounts, iou_matrix
 from filseg.postprocess import components, upsample
 from filseg.scorer import CANDIDATE_CLOSE_PX, CANDIDATE_MIN_AREA
 from filseg.stage2 import (CHANNELS, CROP_H, CROP_W, MIN_SCALE, Frame, build_refiner, crop_inputs, crop_one,
-                           crop_target, paste_back, predict_crops, to_tensor, to_u8, unwarp)
+                           crop_target, frame_of, paste_back, predict_crops, to_tensor, to_u8, unwarp)
 from filseg.train import RUNS, soft_dice_loss
 from filseg.tree import add_context, antichain, fit_hurdle
 from filseg.tree import training_table as tree_table
@@ -61,6 +62,7 @@ OUT = RUNS / "stage2"
 CONTAIN = 0.5  # jitter: a node with at least this share of its area inside an annotator's filament is a fragment of it
 JIT_DEDUP = 0.85  # jitter: nodes this similar (IoU) to a selected seed or to an already-kept node are skipped
 JIT_PER_SEED = 4  # jitter: at most this many extra crops per selected seed of the image (nodes visited in random order)
+JITNEG_PER_SEED = 0.5  # jitter --negatives: at most this many undrawn nodes per selected seed (at least one per image)
 G: dict = {}
 
 
@@ -151,7 +153,8 @@ def step_crops(workers: int) -> None:
     print(f"{n} crops, {int((drew > 0).sum())} drawn by some annotator, {time.time() - t0:.0f} s -> {OUT}", flush=True)
 
 
-def _jitter_one(sel: dict) -> dict:
+def _jitter_one(sel: dict, negatives: bool = False) -> dict:
+    """Extra training crops of one image: drawn nodes (default) or, with ``negatives``, only nodes nobody drew."""
     stem, f = sel["stem"], sel["fold"]
     full = upsample(np.asarray(G["probs"][f][G["pos"][f][stem]], np.float32))
     disk = fit_disk(np.array(G["images"][G["index"].index(stem)]))
@@ -166,34 +169,40 @@ def _jitter_one(sel: dict) -> dict:
     gt = [r for rl in entries for r in rl]
     rest = [j for j in range(len(rles)) if j not in chosen]
     out = dict(stem=stem, fold=f, x=[], y=[], drew=[], level=[])
-    if not rest or not gt:
+    if not rest or (not gt and not negatives):
         return out
     near_seed = (np.asarray(mask_util.iou([rles[j] for j in rest], [rles[j] for j in sel["chosen"]],
                                           [0] * len(chosen))).reshape(len(rest), -1).max(axis=1)
                  if chosen else np.zeros(len(rest)))
-    kept: list[dict] = []
+    kept: list[dict] = []  # drawn nodes kept (and, with negatives, undrawn ones too, for the near-duplicate test)
+    n_pos = n_neg = 0
     cap = JIT_PER_SEED * max(1, len(seeds))
+    cap_neg = max(1, int(round(JITNEG_PER_SEED * len(seeds))))
     order = np.random.default_rng(int(stem[:14])).permutation(len(rest))
     rest, near_seed = [rest[i] for i in order], near_seed[order]
     image = read_image(TRAIN_IMAGES / f"{stem}.jpeg")
     prob8 = to_u8(full)
     for j, ns in zip(rest, near_seed):
-        if len(kept) >= cap:
+        if (n_neg >= cap_neg) if negatives else (n_pos >= cap):
             break
         if ns > JIT_DEDUP:
             continue
         if kept and np.asarray(mask_util.iou([rles[j]], kept, [0] * len(kept))).max() > JIT_DEDUP:
             continue
         node = mask_util.decode(rles[j]).astype(bool)
+        t, k = crop_target(node, entries, frame_of(node), contain=CONTAIN)
+        if (k == 0) != negatives:  # not the kind wanted; in negatives mode drawn nodes still count for the dedup
+            if negatives and n_pos < cap:
+                kept.append(rles[j])
+                n_pos += 1
+            continue
         others = np.zeros_like(node)
         for sd in seeds:
             if not (sd & node).any():  # seeds overlapping the node are versions of the same filament
                 others |= sd
         x, fr = crop_one(image, prob8, node, others)
-        t, k = crop_target(node, entries, fr, contain=CONTAIN)
-        if k == 0:
-            continue
         kept.append(rles[j])
+        n_pos, n_neg = n_pos + (not negatives), n_neg + negatives
         out["x"].append(x)
         out["y"].append(t)
         out["drew"].append(k)
@@ -201,14 +210,16 @@ def _jitter_one(sel: dict) -> dict:
     return out
 
 
-def step_jitter(workers: int) -> None:
+def step_jitter(workers: int, negatives: bool = False) -> None:
+    """Extra training crops -> jit_*; with ``negatives`` the undrawn nodes instead -> jitneg_* (all-zero targets)."""
     t0 = time.time()
     sels = oof_selection()
+    pre = "jitneg" if negatives else "jit"
     with ProcessPoolExecutor(workers, initializer=_init_crops) as ex:
-        recs = list(ex.map(_jitter_one, sels, chunksize=2))
+        recs = list(ex.map(partial(_jitter_one, negatives=negatives), sels, chunksize=2))
     n = sum(len(r["drew"]) for r in recs)
-    X = np.lib.format.open_memmap(OUT / "jit_crops.npy", "w+", np.uint8, (n, len(CHANNELS), CROP_H, CROP_W))
-    Y = np.lib.format.open_memmap(OUT / "jit_targets.npy", "w+", np.uint8, (n, CROP_H, CROP_W))
+    X = np.lib.format.open_memmap(OUT / f"{pre}_crops.npy", "w+", np.uint8, (n, len(CHANNELS), CROP_H, CROP_W))
+    Y = np.lib.format.open_memmap(OUT / f"{pre}_targets.npy", "w+", np.uint8, (n, CROP_H, CROP_W))
     meta, row = [], 0
     for r in recs:
         k = len(r["drew"])
@@ -218,7 +229,7 @@ def step_jitter(workers: int) -> None:
         row += k
     X.flush()
     Y.flush()
-    pickle.dump(meta, open(OUT / "jit_meta.pkl", "wb"))
+    pickle.dump(meta, open(OUT / f"{pre}_meta.pkl", "wb"))
     print(f"{n} extra crops from {sum(1 for m in meta if m['n'])} images, {time.time() - t0:.0f} s -> {OUT}", flush=True)
 
 
@@ -255,31 +266,59 @@ def augment(x: torch.Tensor, y: torch.Tensor, rng: np.random.Generator) -> tuple
     return both[:, :-1], both[:, -1:]
 
 
+def drew_fraction(meta: list[dict], groups: dict) -> np.ndarray:
+    """Per crop of a meta list, the share of its image's annotator entries that drew it (the aux head's target)."""
+    return np.concatenate([np.asarray(m["drew"], np.float32) / max(1, len(groups[m["stem"]]))
+                           for m in meta if m["n"]])
+
+
 def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: float, folds: list[int],
-               extra: str | None = None, aug: bool = False) -> None:
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+               extra: str | None = None, aug: bool = False, negatives: bool = False, neg_weight: float = 1.0,
+               aux_weight: float = 0.0, limit: int = 0) -> None:
+    """Train one refiner per fold.
+
+    Args:
+        negatives: also train on seeds nobody drew (all-zero target): the base ones and, with ``extra``, the
+            jitter nodes of ``jitneg_*`` (step jitter --negatives).
+        neg_weight: weight of those crops in the segmentation loss.
+        aux_weight: > 0 adds a pooled head predicting the share of the image's entries that drew the crop
+            (``drew_fraction``), trained with this loss weight; its OOF output goes to ``<tag>_drew.npy``.
+        limit: smoke tests only: use at most this many training crops per kind per fold.
+    """
+    device = os.environ.get("FILSEG_DEVICE") or "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     X = np.load(OUT / "crops.npy", mmap_mode="r")
     Y = np.load(OUT / "targets.npy", mmap_mode="r")
     meta = pickle.load(open(OUT / "meta.pkl", "rb"))
     fold, drew, _ = rows_of(meta)
-    if extra:  # extra training crops (step jitter); never predicted or evaluated
-        XE = np.load(OUT / f"{extra}_crops.npy", mmap_mode="r")
-        YE = np.load(OUT / f"{extra}_targets.npy", mmap_mode="r")
-        fold_e = np.concatenate([[m["fold"]] * m["n"] for m in pickle.load(open(OUT / f"{extra}_meta.pkl", "rb"))
-                                 if m["n"]])
+    groups = group_by_stem(load_train()) if aux_weight > 0 else {}
+    frac = drew_fraction(meta, groups) if aux_weight > 0 else np.zeros(len(drew), np.float32)
+    sets = []  # extra training crops (step jitter); never predicted or evaluated
+    for name in ([extra] if extra else []) + (["jitneg"] if extra and negatives and (OUT / "jitneg_meta.pkl").exists() else []):
+        m_e = pickle.load(open(OUT / f"{name}_meta.pkl", "rb"))
+        sets.append((np.load(OUT / f"{name}_crops.npy", mmap_mode="r"), np.load(OUT / f"{name}_targets.npy", mmap_mode="r"),
+                     np.concatenate([[m["fold"]] * m["n"] for m in m_e if m["n"]]),
+                     drew_fraction(m_e, groups) if aux_weight > 0 else np.zeros(sum(m["n"] for m in m_e), np.float32),
+                     name == "jitneg"))
     pred_path = OUT / f"{tag}_pred.npy"
     pred = (np.load(pred_path) if pred_path.exists() else np.zeros((len(X), CROP_H, CROP_W), np.float16))
+    drew_path = OUT / f"{tag}_drew.npy"
+    dpred = np.load(drew_path) if drew_path.exists() else np.zeros(len(X), np.float32)
     log = open(OUT / f"{tag}_train.log", "a")
     for f in folds:
         torch.manual_seed(f)
         rng = np.random.default_rng(f)
-        tr = np.nonzero((fold != f) & (drew > 0))[0]
-        Xtr, Ytr = np.asarray(X[tr]), np.asarray(Y[tr])
-        if extra:
-            te_ = np.nonzero(fold_e != f)[0]
+        tr = np.nonzero((fold != f) & ((drew > 0) | negatives))[0]
+        if limit:
+            tr = tr[:limit]
+        Xtr, Ytr, Ftr = np.asarray(X[tr]), np.asarray(Y[tr]), frac[tr]
+        Wtr = np.where(drew[tr] > 0, 1.0, neg_weight).astype(np.float32)
+        for XE, YE, fold_e, frac_e, is_neg in sets:
+            te_ = np.nonzero(fold_e != f)[0][:limit or None]
             Xtr, Ytr = np.concatenate([Xtr, np.asarray(XE[te_])]), np.concatenate([Ytr, np.asarray(YE[te_])])
-            tr = np.arange(len(Xtr))
-        model = build_refiner(arch, encoder).to(device)
+            Ftr = np.concatenate([Ftr, frac_e[te_]])
+            Wtr = np.concatenate([Wtr, np.full(len(te_), neg_weight if is_neg else 1.0, np.float32)])
+        tr = np.arange(len(Xtr))
+        model = build_refiner(arch, encoder, aux=aux_weight > 0).to(device)
         opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
         steps = epochs * (len(tr) // batch)
         sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps, pct_start=0.05)
@@ -292,6 +331,8 @@ def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: f
                 idx = perm[b * batch:(b + 1) * batch]
                 x = to_tensor(Xtr[idx])
                 y = torch.from_numpy(Ytr[idx]).float()[:, None] / 255.0
+                w = torch.from_numpy(Wtr[idx]).to(device)
+                fr = torch.from_numpy(Ftr[idx]).to(device)
                 if aug:
                     x, y = augment(x.to(device), y.to(device), rng)
                 else:
@@ -300,8 +341,17 @@ def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: f
                     if rng.random() < 0.5:
                         x, y = x.flip(-2), y.flip(-2)
                     x, y = x.to(device), y.to(device)
-                logits = model(x)
-                loss = F.binary_cross_entropy_with_logits(logits, y) + 0.5 * soft_dice_loss(logits, y)
+                out = model(x)
+                logits, lab = out if aux_weight > 0 else (out, None)
+                if negatives:  # per-sample weights (the weight 1 case equals the plain mean below)
+                    bce = F.binary_cross_entropy_with_logits(logits, y, reduction="none").mean(dim=(1, 2, 3))
+                    p_ = torch.sigmoid(logits)
+                    dice = 1 - (2 * (p_ * y).sum(dim=(1, 2, 3)) + 1) / (p_.sum(dim=(1, 2, 3)) + y.sum(dim=(1, 2, 3)) + 1)
+                    loss = (w * (bce + 0.5 * dice)).sum() / w.sum()
+                else:
+                    loss = F.binary_cross_entropy_with_logits(logits, y) + 0.5 * soft_dice_loss(logits, y)
+                if lab is not None:
+                    loss = loss + aux_weight * F.binary_cross_entropy_with_logits(lab[:, 0], fr)
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 opt.step()
@@ -313,14 +363,22 @@ def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: f
             log.flush()
         torch.save(model.state_dict(), OUT / f"{tag}_f{f}.pt")
         te = np.nonzero(fold == f)[0]
-        pred[te] = predict_crops([model], np.asarray(X[te]), device).astype(np.float16)
+        if aux_weight > 0:
+            p_te, d_te = predict_crops([model], np.asarray(X[te]), device, return_aux=True)
+            dpred[te] = d_te
+            np.save(drew_path, dpred)
+        else:
+            p_te = predict_crops([model], np.asarray(X[te]), device)
+        pred[te] = p_te.astype(np.float16)
         np.save(pred_path, pred)
         print(f"fold {f}: {len(tr)} training crops, {len(te)} predicted, {time.time() - t0:.0f} s", flush=True)
 
 
-def _init_eval(tag: str) -> None:
+def _init_eval(tag: str, erase: bool = False, grid: tuple[float, ...] = ()) -> None:
     G["groups"] = group_by_stem(load_train())
     G["pred"] = np.load(OUT / f"{tag}_pred.npy", mmap_mode="r")
+    G["erase"], G["grid"] = erase, grid
+    G["drew"] = np.load(OUT / f"{tag}_drew.npy", mmap_mode="r") if grid else None
 
 
 def _eval_one(item: tuple[dict, tuple[float, ...]]) -> tuple[str, dict]:
@@ -343,8 +401,14 @@ def _eval_one(item: tuple[dict, tuple[float, ...]]) -> tuple[str, dict]:
             refined.append(None)
         else:
             refined.append(unwarp(np.asarray(G["pred"][m["row"] + i], np.float32), Frame(m["M"][i], m["scale"][i])))
+    score = np.asarray(m["score"])
     for t in thresholds:
-        out[f"t{t:.2f}"] = counts(paste_back(seeds, refined, np.asarray(m["score"]), t))
+        out[f"t{t:.2f}"] = counts(paste_back(seeds, refined, score, t))
+        if G["erase"]:  # seeds the refiner erased are dropped instead of kept
+            out[f"e{t:.2f}"] = counts(paste_back(seeds, refined, score, t, drop_erased=True))
+    for c in G["grid"]:  # instances whose predicted drew-fraction is below c are dropped before paste-back (t = 0.40)
+        keep = [i for i in range(m["n"]) if G["drew"][m["row"] + i] >= c]
+        out[f"d{c:.2f}"] = counts(paste_back([seeds[i] for i in keep], [refined[i] for i in keep], score[keep], 0.40))
     return m["stem"], out
 
 
@@ -353,10 +417,11 @@ def pq(m: np.ndarray) -> np.ndarray:
     return s[..., 0] / (s[..., 1] + 0.5 * s[..., 2] + 0.5 * s[..., 3])
 
 
-def step_eval(tag: str, workers: int, thresholds: tuple[float, ...], name: str = "eval") -> None:
+def step_eval(tag: str, workers: int, thresholds: tuple[float, ...], name: str = "eval", erase: bool = False,
+              grid: tuple[float, ...] = ()) -> None:
     meta = pickle.load(open(OUT / "meta.pkl", "rb"))
     t0 = time.time()
-    with ProcessPoolExecutor(workers, initializer=_init_eval, initargs=(tag,)) as ex:
+    with ProcessPoolExecutor(workers, initializer=_init_eval, initargs=(tag, erase, grid)) as ex:
         res = dict(ex.map(_eval_one, [(m, thresholds) for m in meta], chunksize=2))
     stems = sorted(res)
     fold = np.array([next(m["fold"] for m in meta if m["stem"] == s) for s in stems])
@@ -452,6 +517,16 @@ def main() -> None:
     ap.add_argument("--aug", action="store_true", help="train: per-sample flips and small affine jitter")
     ap.add_argument("--weights", default="", help="blend: comma-separated weights, one per --blend tag")
     ap.add_argument("--blend", default="", help="blend: comma-separated tags to average into --tag")
+    ap.add_argument("--negatives", action="store_true",
+                    help="train: add seeds nobody drew (all-zero targets), base and (with --extra jit) jitter; "
+                         "jitter: write the undrawn nodes to jitneg_* instead")
+    ap.add_argument("--neg-weight", type=float, default=0.5, help="train --negatives: loss weight of undrawn crops")
+    ap.add_argument("--aux-weight", type=float, default=0.0,
+                    help="train: > 0 adds a head for the share of entries that drew the crop, at this loss weight")
+    ap.add_argument("--limit", type=int, default=0, help="train: smoke test, at most this many crops per kind")
+    ap.add_argument("--erase", action="store_true", help="eval: also report variants where an erased seed is dropped")
+    ap.add_argument("--drop-grid", default="", help="eval: comma-separated drew-fraction cut-offs to report "
+                    "(drop instances whose <tag>_drew.npy output is below)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--tag", default="unet")
     ap.add_argument("--arch", default="Unet")
@@ -469,9 +544,9 @@ def main() -> None:
         step_crops(a.workers)
     elif a.step == "train":
         step_train(a.tag, a.arch, a.encoder, a.epochs, a.batch, a.lr, [int(k) for k in a.folds.split(",")],
-                   a.extra, a.aug)
+                   a.extra, a.aug, a.negatives, a.neg_weight, a.aux_weight, a.limit)
     elif a.step == "jitter":
-        step_jitter(a.workers)
+        step_jitter(a.workers, a.negatives)
     elif a.step == "compare":
         step_compare(a.new, a.old)
     elif a.step == "blend":
@@ -479,7 +554,8 @@ def main() -> None:
     elif a.step == "export":
         step_export(a.tag, [int(k) for k in a.folds.split(",")])
     else:
-        step_eval(a.tag, a.workers, tuple(float(t) for t in a.thresholds.split(",")), a.name)
+        step_eval(a.tag, a.workers, tuple(float(t) for t in a.thresholds.split(",")), a.name, a.erase,
+                  tuple(float(c) for c in a.drop_grid.split(",")) if a.drop_grid else ())
 
 
 if __name__ == "__main__":
