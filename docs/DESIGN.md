@@ -26,14 +26,14 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 | Instances per image (median) | 7 | |
 | Instance area, 5th-95th percentile | 316 to 6963 px | Sets the range for the minimum-area filter |
 
-## 3. Pipeline (current, submission 8 candidate, 2026-11-09)
+## 3. Pipeline (current, submission 8, 2026-11-10, public LB 0.37)
 
 1. **Cache** (`filseg/cache.py`): images area-downsampled to 1536 px; target = fraction
    of annotators marking each pixel, computed at 2048 then downsampled.
 2. **Model** (`filseg/train.py`): `smp.Unet` with ImageNet ResNet-34, 1 input channel,
    BCE + soft Dice on the soft target, AdamW 5e-4 with warm-up and cosine decay,
    batch 4, 40 epochs, flips, 90-degree rotations, +-30 deg affine, brightness/gamma.
-   Final model on all 707 images (`weights/unet_r34_1536_all.pt`).
+   Final model on all 707 images (`weights/unet_r34_1536_all.pt`, the exported `runs/unet_r34_1536_f-1/last.pt`).
 3. **Folds**: 5-fold `GroupKFold` grouped by calendar month (filaments persist for days,
    so same-week images would leak).
 4. **Inference** (`filseg.train.predict_with_spread`): four flipped views; mean = probability map
@@ -484,6 +484,9 @@ Each entry: what we tried, the result, and what we decided.
   median best-match IoU is 0.964, 12 masks below 0.8 and 1 below 0.5, total area +0.2%. 15.9 s per image on
   MPS (shared, loaded machine; submission 7 6.6 s). The expected LB change is +0.007, a quarter of the
   public-LB interval, so the LB may well show 0.37 again; the choice rests on the paired OOF gain.
+  `pipeline.ipynb`, regenerated and executed on 2026-11-10, writes a CSV byte-identical to submission 8 (as it
+  did for submission 7 on 2026-11-08). Uploaded 2026-11-10: **public LB 0.37**. Final selection: submissions 8
+  and 7 (the owner selects on Kaggle).
 
 ## 6. Reference points from other entrants
 

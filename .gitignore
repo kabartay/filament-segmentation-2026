@@ -19,3 +19,4 @@ report/*.out
 report/*.xdv
 report/*.bbl
 report/*.blg
+.claude/
