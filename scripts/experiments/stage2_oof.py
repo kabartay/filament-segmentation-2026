@@ -57,8 +57,9 @@ from filseg.tree import training_table as tree_table
 
 NODES = RUNS / "oof_tree12s_1536_v4.pkl"
 PROBS_RUN = "unet_r34_1536"
-TAU = 0.26
-OUT = RUNS / "stage2"
+TAU = float(os.environ.get("FILSEG_TAU", "0.26"))  # selection threshold of the OOF selection (crops step)
+# output directory of every step; set FILSEG_STAGE2_OUT=stage2_<slug> to leave runs/stage2 untouched
+OUT = RUNS / os.environ.get("FILSEG_STAGE2_OUT", "stage2")
 CONTAIN = 0.5  # jitter: a node with at least this share of its area inside an annotator's filament is a fragment of it
 JIT_DEDUP = 0.85  # jitter: nodes this similar (IoU) to a selected seed or to an already-kept node are skipped
 JIT_PER_SEED = 4  # jitter: at most this many extra crops per selected seed of the image (nodes visited in random order)
@@ -374,6 +375,26 @@ def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: f
         print(f"fold {f}: {len(tr)} training crops, {len(te)} predicted, {time.time() - t0:.0f} s", flush=True)
 
 
+def step_predict(tags: list[str], src: Path, folds: list[int]) -> None:
+    """Predict this directory's crops with the fold refiners ``<src>/<tag>_f{k}.pt`` (each crop by its own fold's
+    model, as in ``train``) -> ``<tag>_pred.npy``. Run under the GPU lock when sharing the machine."""
+    from filseg.stage2 import refiner_arch
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    X = np.load(OUT / "crops.npy", mmap_mode="r")
+    fold, _, _ = rows_of(pickle.load(open(OUT / "meta.pkl", "rb")))
+    for tag in tags:
+        pred = np.zeros((len(X), CROP_H, CROP_W), np.float16)
+        for f in folds:
+            state = torch.load(src / f"{tag}_f{f}.pt", map_location="cpu")
+            model = build_refiner(refiner_arch(state), pretrained=False)
+            model.load_state_dict(state)
+            model.to(device)
+            te = np.nonzero(fold == f)[0]
+            pred[te] = predict_crops([model], np.asarray(X[te]), device).astype(np.float16)
+            print(f"{tag} fold {f}: {len(te)} crops", flush=True)
+        np.save(OUT / f"{tag}_pred.npy", pred)
+
+
 def _init_eval(tag: str, erase: bool = False, grid: tuple[float, ...] = ()) -> None:
     G["groups"] = group_by_stem(load_train())
     G["pred"] = np.load(OUT / f"{tag}_pred.npy", mmap_mode="r")
@@ -466,7 +487,8 @@ def step_compare(new: str, old: str, n_boot: int = 2000) -> None:
     """
     def load(spec: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         f, k = spec.split(":")
-        z = np.load(OUT / f"{f}_per_image.npz")
+        path = OUT / f"{f}_per_image.npz"
+        z = np.load(path if path.exists() else RUNS / "stage2" / f"{f}_per_image.npz")  # baselines live in runs/stage2
         return z["stems"], z["fold"], z[k]
 
     sa, fold, a = load(new)
@@ -512,7 +534,7 @@ def step_export(tag: str, folds: list[int]) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=["crops", "jitter", "train", "eval", "blend", "export", "compare"])
+    ap.add_argument("step", choices=["crops", "jitter", "train", "eval", "blend", "export", "compare", "predict"])
     ap.add_argument("--extra", default=None, help="train: extra crop set to add, e.g. jit (from step jitter)")
     ap.add_argument("--aug", action="store_true", help="train: per-sample flips and small affine jitter")
     ap.add_argument("--weights", default="", help="blend: comma-separated weights, one per --blend tag")
@@ -548,6 +570,8 @@ def main() -> None:
     elif a.step == "train":
         step_train(a.tag, a.arch, a.encoder, a.epochs, a.batch, a.lr, [int(k) for k in a.folds.split(",")],
                    a.extra, a.aug, a.negatives, a.neg_weight, a.aux_weight, a.limit)
+    elif a.step == "predict":
+        step_predict(a.blend.split(","), RUNS / "stage2", [int(k) for k in a.folds.split(",")])
     elif a.step == "jitter":
         step_jitter(a.workers, a.negatives)
     elif a.step == "compare":
