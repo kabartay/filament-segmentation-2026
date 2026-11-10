@@ -554,6 +554,24 @@ are absent from training, so the gap is on the label side. Decision: try the com
 our own implementation: `scripts/experiments/component_tree.py`), then a hurdle target and spread features;
 model diversity only if GPU budget allows.
 
+### Public leaderboard snapshot (2026-11-10 00:40 UTC, full CSV via `kaggle competitions leaderboard --download`)
+
+1,460 teams; we are rank 477 at 0.37 (9 submissions). Teams per displayed score: 0.70 1, 0.64 1, 0.62 4,
+0.61 1, 0.60 3, 0.58 2, 0.57 4, 0.56 6, **0.55 104**, 0.54 3, 0.53 1, 0.49 1, 0.42 1, 0.41 19, **0.40 63**,
+**0.39 136**, 0.38 103, 0.37 137, 0.36 116, 0.35 87, below 0.35 about 800. Reading:
+- The scores are clustered at single values, which means copies of public notebooks: 104 teams at exactly
+  0.55 (first on 2026-08-26) is one public submission re-run; it and everything from 0.53 up sits far above
+  any method shown with an out-of-fold score (best public OOF 0.4597 -> LB 0.39), so we take it to be the
+  scorer's missing one-to-one matching or label leakage from the public MAGFiLO release, both excluded by our
+  rules.
+- The 0.38-0.42 band (322 teams) is mostly the public tree + hurdle + refiner notebook family (tushhaaarrrr,
+  OOF 0.43-0.46 -> LB 0.37-0.39 in its own versions) and its forks, plus selection on a noisy LB: the public
+  split has about 90 images, so one pipeline's score moves by about +-0.027 between image samples, and
+  teams submitting 10-30 times keep their luckiest variant. That luck does not carry over to the private
+  split. Our OOF-to-LB gap (0.06-0.07) is the same as that family's (0.05-0.06).
+- Consequence: no change of method; keep choosing on paired OOF, not on the public LB. Submission 8 (OOF
+  0.4399) also scored 0.37.
+
 Annotator identity: image ids carry a code such as `010401` (37 codes; the last two digits are the slot
 01-03 within an image, the first four look like an annotation batch). The test set has no such codes, so
 per-annotator heads could only be averaged at test time; not pursued.

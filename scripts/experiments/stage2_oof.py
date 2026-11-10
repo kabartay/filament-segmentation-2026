@@ -417,12 +417,22 @@ def step_compare(new: str, old: str, n_boot: int = 2000) -> None:
     print(json.dumps(report), flush=True)
 
 
-def step_blend(tags: list[str], out: str) -> None:
+def step_blend(tags: list[str], out: str, weights: list[float] | None = None) -> None:
+    """Weighted average of several tags' OOF crop probabilities -> ``<out>_pred.npy``.
+
+    Args:
+        tags: refiner tags whose ``<tag>_pred.npy`` are averaged.
+        out: tag of the blend.
+        weights: one weight per tag (normalised to sum 1); equal weights by default.
+    """
+    w = np.array(weights if weights else [1.0] * len(tags), np.float64)
+    assert len(w) == len(tags) and (w >= 0).all() and w.sum() > 0
+    w = w / w.sum()
     preds = [np.load(OUT / f"{t}_pred.npy", mmap_mode="r") for t in tags]
     acc = np.zeros(preds[0].shape, np.float32)
     for lo in range(0, len(acc), 256):
-        for q in preds:
-            acc[lo:lo + 256] += np.asarray(q[lo:lo + 256], np.float32) / len(preds)
+        for q, wk in zip(preds, w):
+            acc[lo:lo + 256] += np.asarray(q[lo:lo + 256], np.float32) * np.float32(wk)
     np.save(OUT / f"{out}_pred.npy", acc.astype(np.float16))
     print(f"{' + '.join(tags)} -> {OUT / f'{out}_pred.npy'}", flush=True)
 
@@ -440,6 +450,7 @@ def main() -> None:
     ap.add_argument("step", choices=["crops", "jitter", "train", "eval", "blend", "export", "compare"])
     ap.add_argument("--extra", default=None, help="train: extra crop set to add, e.g. jit (from step jitter)")
     ap.add_argument("--aug", action="store_true", help="train: per-sample flips and small affine jitter")
+    ap.add_argument("--weights", default="", help="blend: comma-separated weights, one per --blend tag")
     ap.add_argument("--blend", default="", help="blend: comma-separated tags to average into --tag")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--tag", default="unet")
@@ -464,7 +475,7 @@ def main() -> None:
     elif a.step == "compare":
         step_compare(a.new, a.old)
     elif a.step == "blend":
-        step_blend(a.blend.split(","), a.tag)
+        step_blend(a.blend.split(","), a.tag, [float(v) for v in a.weights.split(",")] if a.weights else None)
     elif a.step == "export":
         step_export(a.tag, [int(k) for k in a.folds.split(",")])
     else:
