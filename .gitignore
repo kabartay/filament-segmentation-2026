@@ -1,7 +1,7 @@
 # competition data and caches (download from Kaggle into data/raw/)
-data/
+/data
 # training runs, checkpoints and saved probabilities (regenerable; the final weights live in weights/)
-runs/
+/runs
 # third-party notebooks and repositories kept only for local reference
 refs/
 # generated submissions (pipeline.ipynb regenerates them)
