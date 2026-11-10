@@ -694,6 +694,12 @@ model diversity only if GPU budget allows.
   validated or blended out of fold. Signal: an instance-native detector at full resolution reaches our LB level, while
   our Mask R-CNN (2026-11-03) reached only 0.377 OOF; a modern non-AGPL detector is the one family not tested well.
 
+- **"Solar Filament Panoptic Morphology Segmentation" (read 2026-11-10)**: a re-host of the "LB 0.70" handoff notebook
+  ([public notebook B]): same frozen Mask R-CNN R50-FPN v2 1024 px + ResNet-18 crop refiner weights (MD5-locked), an
+  expected submission MD5, and a "flip TTA only if Dice > 0.62 and area ratio in [0.60, 1.70]" guard; the "Earth Engine
+  spherical morphology" in its title is not in the code. Nothing new; the 0.70 question stays parked
+  (`openspec/changes/verify-lb070-pipeline`).
+
 Annotator identity: image ids carry a code such as `010401` (37 codes; the last two digits are the slot
 01-03 within an image, the first four look like an annotation batch). The test set has no such codes, so
 per-annotator heads could only be averaged at test time; not pursued.
