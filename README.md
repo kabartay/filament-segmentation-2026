@@ -76,9 +76,7 @@ reproduces the organisers' self-evaluation notebook), never on the leaderboard.
 | `weights/unet_r34_1536_all.pt` | final model, trained on all 707 training images at 1536 px |
 | `weights/tree_scorer_1536.pkl` | final tree scorer (scikit-learn hurdle models, feature names, threshold, levels) |
 | `weights/stage2_upp_f{0..4}.pt`, `weights/stage2_jit_f{0..4}.pt` | stage-2 crop refiners, UNet++ and U-Net with extra crops, one per fold (float16 state dicts) |
-| `weights/stage2_unet_f{0..4}.pt` | the single U-Net refiners of submission 7, kept for comparison |
 | `weights/component_scorer_1536.pkl` | single-threshold component scorer (submission 5), kept for comparison |
-| `weights/unet_r34_all.pt` | earlier 1024 px model (submission 4), kept for comparison |
 | `filseg/` | library: data loading, cache, training, metric, post-processing, tuning, prediction, report plots |
 | `scripts/` | helpers for chaining training runs, `scripts/hf/` for training on Hugging Face Jobs; `scripts/experiments/` holds the analyses |
 | `docs/DESIGN.md` | design and decision log: every experiment with its numbers, including the failed ones |
@@ -122,6 +120,28 @@ are not used, and no external filament masks are used.
 and `main.bib` come with the template), and `report/main.pdf` its local build (`cd report && tectonic -X
 compile main.tex`). The figures it uses are copied into `report/figures/`, so the folder uploads to Overleaf
 as it is.
+
+## Data and credits
+
+The images and annotations are those of the Kaggle *Solar Filament Segmentation Challenge 2026*
+(A. Ahmadzadeh, D. J. Kempton, Q. Li and A. A. Pevtsov, 2026), built from the MAGFiLO dataset
+(Ahmadzadeh et al. 2024, *A dataset of manually annotated filaments from H-alpha observations*, Scientific Data 11,
+1031, https://doi.org/10.1038/s41597-024-03876-y). They are not part of this repository; download them from the
+competition page. The weights in `weights/` were trained on the competition's training set, and the figures in
+`docs/figures/` and `report/figures/` show crops of its images.
+
+This work utilizes GONG data obtained by the NSO Integrated Synoptic Program, managed by the National Solar
+Observatory, which is operated by the Association of Universities for Research in Astronomy (AURA), Inc. under a
+cooperative agreement with the National Science Foundation and with contribution from the National Oceanic and
+Atmospheric Administration. The GONG network of instruments is hosted by the Big Bear Solar Observatory, High
+Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias,
+and Cerro Tololo Interamerican Observatory.
+
+The stage-2 refiner follows the second stage of the public notebook
+[Solar Filament Segmentation 2026 (0.40)](https://www.kaggle.com/code/tushhaaarrrr/solar-filament-segmentation-2026-0-40).
+
+Earlier submissions' weights (the submission-7 U-Net refiners and the submission-4 1024 px model) are not
+distributed; the submitted pipeline (submission 8) needs only the files listed above.
 
 ## Licence
 
