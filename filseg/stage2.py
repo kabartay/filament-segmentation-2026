@@ -249,8 +249,85 @@ def refine(models: list[torch.nn.Module], image: np.ndarray, prob: np.ndarray, r
     return [mask_util.encode(np.asfortranarray(m.astype(np.uint8))) for m in masks]
 
 
+ONE_PIECE_MODES = ("", "largest", "join", "join_drop")
+
+
+def _components(m: np.ndarray) -> tuple[int, np.ndarray]:
+    """8-connected labelling of a boolean mask: (number of components, label image with 0 = background)."""
+    n_lab, lab = cv2.connectedComponents(m.astype(np.uint8), connectivity=8)
+    return n_lab - 1, lab
+
+
+def one_piece(masks: list[np.ndarray], mode: str, cap: int = 40, width: int = 3) -> list[np.ndarray]:
+    """Make each (pairwise disjoint) mask a single 8-connected piece.
+
+    Args:
+        masks: boolean (SIZE, SIZE) disjoint masks.
+        mode: ``largest`` keeps the largest piece; ``join`` links pieces by corridors of ``width`` px along a
+            minimum spanning tree of the shortest pairwise gaps (gaps over ``cap`` px are not bridged and
+            those pieces stay separate); ``join_drop`` does the same but then keeps only the piece holding
+            the largest component.
+        cap: longest gap (px, between the nearest pixels of two pieces) that is bridged.
+        width: corridor width in px.
+
+    Returns:
+        boolean masks; corridors only use pixels that no mask owns, so the result stays disjoint.
+    """
+    if mode == "":
+        return masks
+    taken = np.zeros_like(masks[0], bool)
+    for m in masks:
+        taken |= m
+    out = []
+    for m in masks:
+        n, lab = _components(m)
+        if n <= 1:
+            out.append(m)
+            continue
+        areas = np.bincount(lab.ravel())[1:]
+        if mode == "largest":
+            out.append(lab == 1 + int(areas.argmax()))
+            continue
+        # nearest-pixel pair for each pair of components
+        pts = [np.argwhere(lab == k) for k in range(1, n + 1)]
+        edges = []
+        for a in range(n):
+            dt = cv2.distanceTransform((lab != a + 1).astype(np.uint8), cv2.DIST_L2, 3)
+            for b in range(a + 1, n):
+                d = dt[pts[b][:, 0], pts[b][:, 1]]
+                k = int(d.argmin())
+                if d[k] <= cap:
+                    pb = pts[b][k]
+                    pa = pts[a][int(np.argmin(((pts[a] - pb) ** 2).sum(1)))]
+                    edges.append((float(d[k]), a, b, pa, pb))
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        res = m.copy()
+        free = ~taken
+        for d, a, b, pa, pb in sorted(edges, key=lambda e: e[0]):
+            if find(a) == find(b):
+                continue
+            parent[find(a)] = find(b)
+            line = np.zeros(m.shape, np.uint8)
+            cv2.line(line, (int(pa[1]), int(pa[0])), (int(pb[1]), int(pb[0])), 1, width)
+            res |= (line > 0) & free
+        n2, lab2 = _components(res)
+        if mode == "join_drop" and n2 > 1:
+            a2 = np.bincount(lab2.ravel())[1:]
+            res = lab2 == 1 + int(a2.argmax())
+        out.append(res)
+    return out
+
+
 def paste_back(seeds: list[np.ndarray], refined: list[np.ndarray | None], score: np.ndarray,
-               t_pix: float = T_PIX, drop_erased: bool = False) -> list[np.ndarray]:
+               t_pix: float = T_PIX, drop_erased: bool = False, single: str = "",
+               cap: int = 40) -> list[np.ndarray]:
     """Disjoint final masks of one image.
 
     Args:
@@ -260,6 +337,9 @@ def paste_back(seeds: list[np.ndarray], refined: list[np.ndarray | None], score:
         t_pix: pixel threshold of the refined probability.
         drop_erased: a seed whose refined mask is empty is dropped instead of kept as stage 1 drew it (for
             refiners trained on undrawn seeds, which learn to erase them).
+        single: one of ``ONE_PIECE_MODES``; default ``""`` leaves the pieces as they come out (submitted
+            pipeline), see ``one_piece`` for the others.
+        cap: corridor length cap of the ``join`` modes.
 
     Returns:
         boolean masks, one per surviving instance, pairwise disjoint.
@@ -307,4 +387,4 @@ def paste_back(seeds: list[np.ndarray], refined: list[np.ndarray | None], score:
         m = covered & (owner == r)
         if m.sum():
             out.append(m)
-    return out
+    return one_piece(out, single, cap) if single else out

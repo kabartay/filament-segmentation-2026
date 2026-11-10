@@ -381,8 +381,8 @@ def _init_eval(tag: str, erase: bool = False, grid: tuple[float, ...] = ()) -> N
     G["drew"] = np.load(OUT / f"{tag}_drew.npy", mmap_mode="r") if grid else None
 
 
-def _eval_one(item: tuple[dict, tuple[float, ...]]) -> tuple[str, dict]:
-    m, thresholds = item
+def _eval_one(item: tuple[dict, tuple[float, ...], str, int]) -> tuple[str, dict]:
+    m, thresholds, single, cap = item
     entries = G["groups"][m["stem"]]
     seeds = [mask_util.decode(r).astype(bool) for r in m["seeds"]]
     out = {}
@@ -403,7 +403,7 @@ def _eval_one(item: tuple[dict, tuple[float, ...]]) -> tuple[str, dict]:
             refined.append(unwarp(np.asarray(G["pred"][m["row"] + i], np.float32), Frame(m["M"][i], m["scale"][i])))
     score = np.asarray(m["score"])
     for t in thresholds:
-        out[f"t{t:.2f}"] = counts(paste_back(seeds, refined, score, t))
+        out[f"t{t:.2f}"] = counts(paste_back(seeds, refined, score, t, single=single, cap=cap))
         if G["erase"]:  # seeds the refiner erased are dropped instead of kept
             out[f"e{t:.2f}"] = counts(paste_back(seeds, refined, score, t, drop_erased=True))
     for c in G["grid"]:  # instances whose predicted drew-fraction is below c are dropped before paste-back (t = 0.40)
@@ -418,11 +418,11 @@ def pq(m: np.ndarray) -> np.ndarray:
 
 
 def step_eval(tag: str, workers: int, thresholds: tuple[float, ...], name: str = "eval", erase: bool = False,
-              grid: tuple[float, ...] = ()) -> None:
+              grid: tuple[float, ...] = (), single: str = "", cap: int = 40) -> None:
     meta = pickle.load(open(OUT / "meta.pkl", "rb"))
     t0 = time.time()
     with ProcessPoolExecutor(workers, initializer=_init_eval, initargs=(tag, erase, grid)) as ex:
-        res = dict(ex.map(_eval_one, [(m, thresholds) for m in meta], chunksize=2))
+        res = dict(ex.map(_eval_one, [(m, thresholds, single, cap) for m in meta], chunksize=2))
     stems = sorted(res)
     fold = np.array([next(m["fold"] for m in meta if m["stem"] == s) for s in stems])
     keys = list(res[stems[0]])
@@ -537,6 +537,9 @@ def main() -> None:
     ap.add_argument("--folds", default="0,1,2,3,4")
     ap.add_argument("--thresholds", default="0.30,0.35,0.40,0.45,0.50,0.55")
     ap.add_argument("--name", default="eval", help="eval: report written to <tag>_<name>.json")
+    ap.add_argument("--single", default="", choices=["", "largest", "join", "join_drop"],
+                    help="eval: make every pasted-back instance one piece (default off)")
+    ap.add_argument("--cap", type=int, default=40, help="eval: longest gap in px bridged by --single join")
     ap.add_argument("--new", default="", help="compare: <tag>_<name>:<key> of the variant, e.g. ens_pi:t0.40")
     ap.add_argument("--old", default="", help="compare: the baseline in the same form, e.g. unet_pi:t0.40")
     a = ap.parse_args()
@@ -555,7 +558,7 @@ def main() -> None:
         step_export(a.tag, [int(k) for k in a.folds.split(",")])
     else:
         step_eval(a.tag, a.workers, tuple(float(t) for t in a.thresholds.split(",")), a.name, a.erase,
-                  tuple(float(c) for c in a.drop_grid.split(",")) if a.drop_grid else ())
+                  tuple(float(c) for c in a.drop_grid.split(",")) if a.drop_grid else (), a.single, a.cap)
 
 
 if __name__ == "__main__":
