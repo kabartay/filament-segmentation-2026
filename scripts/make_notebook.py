@@ -27,6 +27,10 @@ tree -> stage 2: each selected filament redrawn at native resolution in a crop t
 (384 x 128 px; inputs image, stage-1 probability, the filament and its neighbours) by ten refiners
 (five UNet++ and five U-Nets trained with extra crops from other tree levels), averaged, thresholded at 0.40 and pasted back disjoint -> one compressed COCO RLE per filament.
 
+The threshold tree, the hurdle target, the exact selection and the stage-2 rotated-crop refiner follow the public notebook
+[Solar Filament Segmentation 2026 (0.40)](https://www.kaggle.com/code/tushhaaarrrr/solar-filament-segmentation-2026-0-40);
+the implementation and the view-spread features are ours.
+
 Every design choice, with the experiments behind it (including the failed ones), is in `docs/DESIGN.md`.
 """)
 md("## 1. Setup")
