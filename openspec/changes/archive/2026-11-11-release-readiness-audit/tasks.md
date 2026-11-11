@@ -81,9 +81,10 @@
   so no ImageNet download is needed. Smoke test, one process, nice 10: `import filseg.predict, stage2, tree, train,
   report, metric` works from the worktree; `load_tree_scorer`, `torch.load` of the 1536 px U-Net and
   `load_refiners` for one UNet++ and one U-Net refiner all load on CPU in 45 s.
-- [ ] 4.4 Not done: a fresh-venv `pip install -r requirements.txt` (torch is several GB; machine load) and the
+- [x] 4.4 Not done: a fresh-venv `pip install -r requirements.txt` (torch is several GB; machine load) and the
   full 180-image run (about 16 s per image on the M3 Max, so about 48 min there; slower on CPU-only machines).
   Owner: run both once on a clean machine or the Kaggle CPU kernel before the flip.
+  Done 2026-11-11: fresh `git clone` of 1874e1f, `python3.12 -m venv`, `pip install -r requirements-dev.txt`; 45 tests pass; `jupyter nbconvert --execute pipeline.ipynb` with FILSEG_RAW outside the clone runs all 180 test images in 39 min on the shared M3 Max (MPS) and writes a CSV byte-identical to sub8. The first attempt found a crash when FILSEG_RAW lies outside the repository (fixed in 1874e1f).
 - [x] 4.5 Risk: the pinned versions (torch 2.15.0, numpy 2.5.4, ...) must exist on PyPI for the judges' Python;
   README says Python 3.12. Owner: confirm with `pip install --dry-run -r requirements.txt` on a clean 3.12.
   Done 2026-11-11: `uv pip install --dry-run -r requirements-dev.txt` on a fresh Python 3.12 venv (macOS arm64) and `uv pip compile --python-platform x86_64-unknown-linux-gnu --python-version 3.12` both resolve every pin (torch 2.15.0, numpy 2.5.4, scikit-learn 1.9.1, ...).
