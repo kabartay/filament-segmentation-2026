@@ -8,7 +8,7 @@
 
 - [ ] 2.1 Final README, report PDF (4 pages) and notebook consistent; verify: `.venv/bin/python scripts/make_notebook.py` and compile `report/main.tex`
 - [ ] 2.2 Owner-gated: owner asks, then at or after 2026-11-15 23:59 CDT run `gh repo edit kabartay/filament-segmentation-2026 --visibility public --accept-visibility-change-consequences`; verify: `gh repo view kabartay/filament-segmentation-2026 --json visibility`
-- [ ] 2.3 Owner-gated: owner fills the Google form with the repo URL; verify: owner confirms
+- [x] 2.3 Owner-gated: owner fills the Google form with the repo URL; verify: owner confirms. Result 2026-11-11: submitted by the owner from the personal Google account (repo URL, sub8_r34_1536_tree_stage2_ens.csv, report/main.pdf at 87880e4); "Your response has been recorded". Editable until the deadline.
 - [ ] 2.4 After going public, check CI and README links; verify: `gh run list -R kabartay/filament-segmentation-2026 --limit 3` and a link check of README.md
 
 ## 3. Record
