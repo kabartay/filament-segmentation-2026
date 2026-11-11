@@ -4,16 +4,29 @@ Entry to the [Solar Filament Segmentation Challenge 2026](https://www.kaggle.com
 instance segmentation of solar filaments on GONG H-alpha full-disk images (2048 x 2048 px), scored by
 Panoptic Quality (PQ) against each MAGFiLO annotator separately.
 
-**Result.** A single U-Net (ResNet-34 encoder) at 1536 px over four flipped views, followed by learned
-instance selection: candidates at twelve thresholds form a tree, a gradient-boosted hurdle model predicts each
-candidate's expected PQ contribution, and the best disjoint set is chosen exactly on the tree; a second stage
-redraws each chosen filament at native resolution in a crop turned along its own axis. Out-of-fold PQ 0.440
-(95% bootstrap interval 0.431-0.449) on all 707 training images (5-fold split by calendar month), against 0.427
-without the second stage (paired gain +0.013 [0.010, 0.016], on all five folds), 0.422 with a single threshold
-and 0.409 for the 1024 px hand-rule pipeline. Public leaderboard PQ 0.37 for the first version of stage 2 (one
-refiner kind, OOF 0.433), 0.36 for the first stage alone and 0.35 for both earlier pipelines (two decimals over
-about 90 images cannot resolve these gains). For scale, one human
-annotator scored against another on the same images gives PQ 0.340.
+**Result.** One U-Net (ResNet-34 encoder) at 1536 px over four flipped views; learned instance selection on a
+tree of candidates at twelve thresholds; a second stage that redraws each selected filament at native resolution in
+a crop turned along its own axis. Out-of-fold PQ **0.440** (95% bootstrap interval 0.431-0.449) on all 707 training
+images (5-fold split by calendar month), public leaderboard 0.37. For scale, one human annotator scored against
+another on the same images gives PQ 0.340.
+
+| Submission | Pipeline | Local PQ | Public LB |
+|---|---|---|---|
+| 1 | U-Net R34 1024 px, fold 0, epoch 10, hand rule | 0.389 (fold 0) | 0.32 |
+| 2 | the same, 40 epochs | 0.415 (fold 0) | 0.35 |
+| 3 | average of 5 fold models, hand rule | 0.410 (OOF) | 0.35 |
+| 4 | one model on all images, hand rule | 0.409 (OOF) | 0.35 |
+| 5 | 1536 px, 4 flips, single threshold + learned scorer | 0.422 (OOF) | 0.35 |
+| 6 | 12-level tree + hurdle scorer + exact selection (stage 1) | 0.427 (OOF) | 0.36 |
+| 7 | stage 1 + one U-Net crop refiner per fold | 0.433 (OOF) | 0.37 |
+| **8 (final)** | stage 1 + UNet++ and jitter U-Net refiners, ten models | **0.440 (OOF)** | 0.37 |
+
+From submission 4 on, the submitted model is trained on all images and the local PQ is that of the same pipeline
+run on the five fold models' out-of-fold predictions. Every step from 5 to 8 was adopted on a paired bootstrap over
+images of those predictions; submission 8
+gains +0.013 [0.010, 0.016] over stage 1 and +0.007 [0.005, 0.009] over submission 7, on all five folds. The public
+leaderboard scores about 90 images to two decimals (about +-0.027), so it cannot resolve these steps and was never
+used to choose. `filseg/metric.py` reproduces the organisers' PQ notebook exactly.
 
 ## Reproduce the submitted predictions
 
@@ -22,6 +35,8 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt   # Python 3.1
 # download the competition data and unzip it so that this path exists:
 #   data/raw/MAGFiLO_1.0_Kaggle_2026/test/test_images/*.jpeg
 .venv/bin/jupyter lab pipeline.ipynb   # or: jupyter nbconvert --to notebook --execute pipeline.ipynb
+
+.venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest   # optional: 45 tests, about 10 s
 ```
 
 `pipeline.ipynb` loads `weights/unet_r34_1536_all.pt`, `weights/tree_scorer_1536.pkl` and the ten stage-2
@@ -49,12 +64,14 @@ refiners; 6.6 s with the five refiners of submission 7).
 6. **Selection**: a hurdle model, P(match) x E[matched IoU per annotator entry | match], both gradient-boosted
    and trained on out-of-fold nodes of five fold models, scores every node from 32 features (shape,
    probability, contrast, disk position, tree context, view spread). The submission is the disjoint set of
-   nodes maximising the sum of (score - 0.26), solved exactly by dynamic programming on the forest. Out of
+   nodes maximising the sum of (score - 0.26), solved exactly by dynamic programming on the forest. The threshold
+   tree, the hurdle target and the exact selection follow the first stage of the public notebook
+   [Solar Filament Segmentation 2026 (0.40)](https://www.kaggle.com/code/tushhaaarrrr/solar-filament-segmentation-2026-0-40);
+   the implementation and the features (including the view spread) are ours. Out of
    fold this gains +0.005 [0.001, 0.008] over a single threshold with the same kind of scorer
    (`filseg/scorer.py`, submission 5) and +0.018 [0.013, 0.023] over the 1024 px hand rule (paired bootstrap
    over images, `scripts/experiments/bootstrap_pq.py`).
-7. **Stage 2** (`filseg/stage2.py`, after the second stage of the public notebook
-   [Solar Filament Segmentation 2026 (0.40)](https://www.kaggle.com/code/tushhaaarrrr/solar-filament-segmentation-2026-0-40)):
+7. **Stage 2** (`filseg/stage2.py`, after the second stage of the same public notebook):
    each selected filament is redrawn in a 384 x 128 px crop turned along its principal axis, at native
    resolution, from four channels (image, stage-1 probability, the filament, the other selected filaments).
    Target: the mean mask of the annotators who drew that filament. Two refiner kinds, one model per fold
@@ -65,23 +82,33 @@ refiners; 6.6 s with the five refiners of submission 7).
    by the refiners that did not see them) +0.013 [0.010, 0.016] over stage 1, on all five folds; +0.007
    [0.005, 0.009] over the single U-Net refiner of submission 7 (`scripts/experiments/stage2_oof.py`).
 
-Everything was chosen on out-of-fold predictions with the exact competition metric (`filseg/metric.py`
-reproduces the organisers' self-evaluation notebook), never on the leaderboard.
+**What did not help** (each measured out of fold, numbers in `docs/DESIGN.md`): a Mask R-CNN detector and
+detector + U-Net combinations; an axis-aligned crop refiner; ResNet-50 and ConvNeXt-T encoders; limb-darkening
+correction; Lovasz loss; 2048 px input; post-processing variants (hysteresis, size-dependent confidence,
+growing or shrinking masks); 15 tree levels; more scorer capacity and extra features; a different tau; weighted refiner
+blends; a refiner trained with negative crops; making each instance one piece; a UNet++ on the jitter crops
+(+0.002, not on every fold).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `pipeline.ipynb` | the whole inference pipeline, plus the validation figures and the training commands |
-| `weights/unet_r34_1536_all.pt` | final model, trained on all 707 training images at 1536 px |
-| `weights/tree_scorer_1536.pkl` | final tree scorer (scikit-learn hurdle models, feature names, threshold, levels) |
-| `weights/stage2_upp_f{0..4}.pt`, `weights/stage2_jit_f{0..4}.pt` | stage-2 crop refiners, UNet++ and U-Net with extra crops, one per fold (float16 state dicts) |
-| `weights/component_scorer_1536.pkl` | single-threshold component scorer (submission 5), kept for comparison |
-| `filseg/` | library: data loading, cache, training, metric, post-processing, tuning, prediction, report plots |
-| `scripts/` | helpers for chaining training runs, `scripts/hf/` for training on Hugging Face Jobs; `scripts/experiments/` holds the analyses |
+| `pipeline.ipynb` | the whole inference pipeline, plus the validation figures and the training commands (generated by `scripts/make_notebook.py`) |
+| `weights/unet_r34_1536_all.pt` | stage-1 U-Net, trained on all 707 training images at 1536 px (93 MB) |
+| `weights/tree_scorer_1536.pkl` | tree scorer: scikit-learn hurdle models, feature names, tau and levels (3 MB) |
+| `weights/stage2_upp_f{0..4}.pt`, `weights/stage2_jit_f{0..4}.pt` | stage-2 crop refiners, UNet++ and U-Net with extra crops, one per fold (float16 state dicts, 47-50 MB each) |
+| `weights/component_scorer_1536.pkl` | single-threshold scorer of submission 5, kept for comparison |
+| `filseg/` | library; the submitted path is `cache`, `data`, `train`, `geometry`, `postprocess`, `tree`, `stage2`, `predict`, `metric`; modules marked "Status" in their docstring are earlier experiments |
+| `scripts/` | training helpers and host launchers, described in `scripts/README.md`; `scripts/experiments/` holds the out-of-fold analyses (`scripts/experiments/README.md`) |
+| `tests/` | 45 fast tests (metric, tree selection, stage-2 paste-back, geometry, weight loading); no competition data needed |
 | `docs/DESIGN.md` | design and decision log: every experiment with its numbers, including the failed ones |
 | `docs/figures/` | the organisers' three evaluation plots on out-of-fold predictions, and analysis figures |
-| `requirements.txt` | exact package versions used |
+| `openspec/` | specifications of the pipeline (`openspec/specs/`) and every change proposed, adopted or rejected, with its falsification rule (`openspec/changes/archive/`) |
+| `report/` | the 4-page technical report (LaTeX source and PDF) |
+| `requirements.txt`, `requirements-dev.txt` | exact package versions used; the dev file adds pytest |
+
+The two `.pkl` files are pickled scikit-learn models: they load with the pinned scikit-learn 1.9.1, and like any
+pickle they run code when loaded, so load them only from this repository.
 
 ## Train from scratch
 
@@ -109,7 +136,7 @@ L=0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8
 ```
 
 One 1536 px fold takes about 40 min on an A100 or about 3 h on an M3 Max; one stage-2 refiner fold 16-20 min (U-Net), 41-49 min (UNet++) or 28-36 min (U-Net with
-the extra crops) on an M3 Max; building the extra crops about 17 h of CPU.
+the extra crops) on an M3 Max; building the stage-2 crops and the extra crops about 17 min each on CPU (4 workers).
 
 Only the competition's training images and annotations are used. Filament spines and chirality labels
 are not used, and no external filament masks are used.
@@ -139,7 +166,7 @@ Atmospheric Administration. The GONG network of instruments is hosted by the Big
 Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias,
 and Cerro Tololo Interamerican Observatory.
 
-The stage-2 refiner follows the second stage of the public notebook
+The threshold tree with its hurdle scorer and exact selection, and the stage-2 refiner, follow the public notebook
 [Solar Filament Segmentation 2026 (0.40)](https://www.kaggle.com/code/tushhaaarrrr/solar-filament-segmentation-2026-0-40).
 
 Earlier submissions' weights (the submission-7 U-Net refiners and the submission-4 1024 px model) are not

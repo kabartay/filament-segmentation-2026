@@ -4,6 +4,26 @@ Kaggle Filament Segmentation Challenge 2026 (MAGFiLO, GONG H-alpha, 2048 x 2048)
 Deadline 2026-11-15 23:59 CDT. This file records what we built, why, and what each
 experiment showed. Numbers are on our own validation folds unless marked "LB".
 
+**Final state (2026-11-11).** Submission 8 is the one final selection: out-of-fold PQ 0.4399 [0.4305, 0.4487] on
+all 707 training images, public LB 0.37. Modelling stopped on 2026-11-11; the last experiment (`uppj`, end of
+section 5) was rejected. Submission history:
+
+| Sub | Date | Pipeline | Local PQ | Public LB |
+|---|---|---|---|---|
+| 1 | 2026-11-03 | U-Net R34 1024 px, fold 0, epoch 10, hand rule | 0.389 (fold 0) | 0.32 |
+| 2 | 2026-11-03 | the same, 40 epochs | 0.415 (fold 0) | 0.35 |
+| 3 | 2026-11-04 | average of the 5 fold models | 0.410 (OOF) | 0.35 |
+| 4 | 2026-11-04 | one model on all images, hand rule | 0.409 (OOF) | 0.35 |
+| 5 | 2026-11-05 | 1536 px, 4 flips, single threshold + scorer | 0.422 (OOF) | 0.35 |
+| 6 | 2026-11-05 | 12-level tree, hurdle scorer, exact selection | 0.427 (OOF) | 0.36 |
+| 7 | 2026-11-08 | + one U-Net crop refiner per fold | 0.433 (OOF) | 0.37 |
+| 8 | 2026-11-10 | + UNet++ and jitter U-Net refiners (ten models) | 0.440 (OOF) | 0.37 |
+
+How to read this file: sections 1-3 are the scoring, the data facts and the submitted pipeline; section 4 is the
+plan as written during the competition (historical); section 5 is the dated log of every experiment, in order;
+section 6 compares with other entrants; section 8 lists what was never tried. The OpenSpec changes in
+`openspec/changes/archive/` hold the same decisions with their falsification rules.
+
 ## 1. What is scored
 
 - Panoptic Quality, one class, pooled over every annotator-image entry:
@@ -66,7 +86,7 @@ RQ 0.636). Mean IoU 0.575, mean Dice 0.708; merges 3.1%, splits 3.8%, prediction
 1,067 filaments on 177 of 180 images, public LB 0.36 (2026-11-05; sub4/sub5 0.35), 8.6 s per image on the M3 Max (shared, loaded machine). View spread on
 MPS vs the HF (CUDA) OOF maps: max per-pixel difference 0.008, mean spread about 0.0002-0.0004.
 
-## 4. Plan
+## 4. Plan (historical, as written during the competition; the outcome of each step is in section 5)
 
 | Step | What | Status |
 |---|---|---|
@@ -752,27 +772,19 @@ per-annotator heads could only be averaged at test time; not pursued.
 - Hu et al. 2026 (arXiv 2607.24525): MORDEN; Instance Norm, gamma/zoom augmentation, DBSCAN grouping.
 - Chalmers and Ahmadzadeh 2025 (arXiv 2509.18214): chirality classification on MAGFiLO; not used for segmentation.
 
-## 8. Ideas not yet tried
+## 8. Ideas not tried
 
-Ranked by expected value per hour, given that the remaining loss is mostly extent and annotator
-disagreement:
+Status when modelling stopped (2026-11-11). Everything else from the earlier list was tried and is in section 5
+(limb filter, limb-darkening input, ResNet-50, Lovasz loss, 1536 and 2048 px input, training on all images).
 
-1. ~~Re-tune the limb filter with the Hough disk~~: done, no change (the model already skips the limb).
-2. ~~Limb-darkening correction as input~~: tried, no gain (0.4112 vs 0.4160).
-3. ~~Heavier encoder~~: ResNet-50 tried, no gain alone or averaged.
-4. ~~Boundary-aware loss~~: Lovasz hinge tried, worse (0.390); a boundary/distance term not tried. (Sampling one annotator's mask per step instead of the consensus is not worth a run: with
-   BCE its expected gradient equals training on the consensus.)
-5. **Per-instance threshold** (relative to the instance's own peak) for the extent problem; CPU test.
-   Global growing/shrinking already failed, so expect little.
-5b. **Higher input resolution** (1536 px, or 2048 px tiles): one pixel of boundary matters a lot (see the
-   grow/shrink entry), so a sharper probability map may raise SQ even though a 1024 px round trip of the
-   GT itself keeps IoU 0.975.
-6. **Train on all 707 images** for the final model instead of the 5-fold average (no LB gain from the
-   ensemble, 5x cheaper inference): done 2026-11-04 09:08 (`runs/unet_r34full_f-1/last.pt`, 40 epochs, 140 s/epoch, final loss 0.3436);
-   CSV `submissions/sub4_unet_r34_alldata.csv` with the submission-2/3 setting (0.45, 31, 300, 0.8), 0.39 s/image;
-   public LB 0.35. This is the final model unless something beats it.
-7. **Learned grouping** (CondInst, Guo et al. 2022; DBSCAN on fragments, Hu et al. 2026): low priority,
-   because merges and splits are only about a sixth of the near misses.
-
-Tried and rejected so far: Mask R-CNN detector, crop refiner, detector + U-Net combinations, ensembling
-with a weaker model, size-dependent confidence, hysteresis, a lower minimum area (all in section 5).
+- **A stronger stage-1 backbone** (EfficientNetV2-S at 1536 px; OpenSpec `plan-effnetv2-stage1`, still open):
+  about 50 GPU hours on the M3 Max for five folds (estimated, not measured) plus the all-data model and a rerun of
+  the tree, scorer and refiners. Not started: no evidence of a gain at this stage, and it does not fit the time left
+  with any slack.
+- **A ConvNeXt refiner** and **best-epoch selection of the refiners** (closed as not pursued; the code review bounds
+  best-epoch selection at about +0.002 on one fold).
+- **A boundary or distance loss** for the extent errors (Lovasz hinge was worse, 0.390).
+- **A per-instance threshold** relative to each instance's own peak (global growing and shrinking failed, so little
+  is expected).
+- **Learned grouping** (CondInst, Guo et al. 2022; DBSCAN on fragments, Hu et al. 2026): merges and splits are
+  only about a sixth of the near misses.
