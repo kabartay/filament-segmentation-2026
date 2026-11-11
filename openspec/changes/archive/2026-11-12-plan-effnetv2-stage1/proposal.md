@@ -7,6 +7,8 @@ component tree selects from. The claim is a two-decimal LB change on ~90 images 
 
 ## What Changes
 
+Status 2026-11-12: NOT PURSUED. A one-epoch timing probe on the M3 Max (1536 px, batch 4) did not finish an epoch in 30 min and grew past 43 GB of memory; see tasks.md 2.1.
+
 - Train an EfficientNetV2-S encoder U-Net on our own 5-fold GroupKFold-by-month split, 1536 px, same recipe as the
   current members; add its OOF map to the stage-1 average; rebuild the tree and re-run selection and stage 2.
 - Source: dariushafshar's notebook (read as text only; never executed). Claimed gain: LB 0.37 -> 0.39 (not OOF).

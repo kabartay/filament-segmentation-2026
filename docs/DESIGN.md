@@ -607,6 +607,12 @@ Each entry: what we tried, the result, and what we decided.
   0.027-wide public LB), but the gain sits on folds 2-4 only. sub8 stays the final submission. The fold models are kept
   locally in `runs/stage2/uppj_f*.pt` only.
 
+- **EfficientNetV2-S stage 1, timing probe (2026-11-11, OpenSpec `plan-effnetv2-stage1`)**: `filseg.train --encoder
+  tu-tf_efficientnetv2_s` (22.1 M parameters), fold 0, 1536 px, batch 4, MPS. After 30 min the first epoch had not
+  finished (ResNet-34: about 4.5 min per epoch) and the process footprint had passed 43 GB, filling swap (about 60 GB)
+  and cutting free disk from 76 to 30 GB; stopped. The five folds would not fit before the deadline on this machine,
+  so the plan is closed as not pursued and submission 8 stays final.
+
 ## 6. Reference points from other entrants
 
 | Source | Method | Local PQ | LB |
@@ -778,10 +784,9 @@ per-annotator heads could only be averaged at test time; not pursued.
 Status when modelling stopped (2026-11-11). Everything else from the earlier list was tried and is in section 5
 (limb filter, limb-darkening input, ResNet-50, Lovasz loss, 1536 and 2048 px input, training on all images).
 
-- **A stronger stage-1 backbone** (EfficientNetV2-S at 1536 px; OpenSpec `plan-effnetv2-stage1`, still open):
-  about 50 GPU hours on the M3 Max for five folds (estimated, not measured) plus the all-data model and a rerun of
-  the tree, scorer and refiners. Not started: no evidence of a gain at this stage, and it does not fit the time left
-  with any slack.
+- **A stronger stage-1 backbone** (EfficientNetV2-S at 1536 px; OpenSpec `plan-effnetv2-stage1`, closed): a timing
+  probe did not finish one epoch in 30 min and passed 43 GB of memory on the M3 Max (section 5), so five folds do not
+  fit before the deadline on this machine.
 - **A ConvNeXt refiner** and **best-epoch selection of the refiners** (closed as not pursued; the code review bounds
   best-epoch selection at about +0.002 on one fold).
 - **A boundary or distance loss** for the extent errors (Lovasz hinge was worse, 0.390).
