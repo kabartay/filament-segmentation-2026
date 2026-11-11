@@ -6,6 +6,10 @@ components. Each epoch samples one annotator per image, so images with several
 annotators contribute every annotator's grouping over the course of training.
 
 Run: ``.venv/bin/python -m filseg.detector --fold 0 --name mrcnn``
+
+Status: not used by the submitted pipeline (submission 8). Mask R-CNN on its own scored below the U-Net (fold 0, best
+0.377 with disjoint masks against 0.389), and detector instances added to U-Net components gained at most 0.01,
+inside fold noise. docs/DESIGN.md, "Mask R-CNN detector, fold 0".
 """
 
 from __future__ import annotations

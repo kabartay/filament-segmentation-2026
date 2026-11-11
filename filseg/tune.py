@@ -9,6 +9,10 @@ number of (threshold, closing) pairs.
 Several runs (one per fold) are tuned together on their pooled out-of-fold images.
 
 Run: ``.venv/bin/python -m filseg.tune --run unet_r34_f0`` or ``--run unet_r34full_f{0..4}``
+
+Status: not used by the submitted pipeline (submission 8). It tunes the hand rule (threshold, closing, area,
+confidence, limb filter) of submissions 1 to 4, which the tree scorer replaced. docs/DESIGN.md, "Pooled tuning,
+all 5 folds" and "Second-stage component scorer".
 """
 
 from __future__ import annotations

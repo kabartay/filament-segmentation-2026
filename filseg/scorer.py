@@ -12,6 +12,12 @@ we keep the candidates with predicted y above ``tau``. On the 5-fold OOF this gi
 0.4086 for the rule, and it wins on every fold (docs/DESIGN.md, "Second-stage component scorer").
 
 Fit: ``.venv/bin/python -m filseg.scorer --components runs/oof_components.pkl --out weights/component_scorer.pkl``
+
+Status: partly used by the submitted pipeline (submission 8). ``component_features``, ``make_regressor``, ``training_table``
+and the ``CANDIDATE_*`` constants are imported by ``filseg.tree``. The single-threshold pipeline itself
+(``candidates``, ``Scorer``, ``load_scorer``, ``python -m filseg.scorer``, ``predict --scorer``) is that of submission 5
+and was replaced by the tree scorer; ``predict`` still imports ``load_scorer`` for that path. docs/DESIGN.md,
+"Second-stage component scorer" and "Submission 5 candidate".
 """
 
 from __future__ import annotations

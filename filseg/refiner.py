@@ -13,6 +13,10 @@ Run:
   ``.venv/bin/python -m filseg.refiner cache``                      build the crop store
   ``.venv/bin/python -m filseg.refiner train --fold 0``             train
   ``.venv/bin/python -m filseg.refiner eval --fold 0 --proposals sub1``  PQ on U-Net proposals
+
+Status: not used by the submitted pipeline (submission 8). This is the 2026-11-03 axis-aligned box-crop refiner
+on U-Net proposals (fold 0, PQ 0.389 to 0.402), superseded by the rotated-crop stage 2 of ``filseg.stage2``.
+docs/DESIGN.md, "Crop refiner on U-Net proposals, fold 0" and "Stage 2, rotated-crop refiner".
 """
 
 from __future__ import annotations

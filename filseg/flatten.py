@@ -8,6 +8,10 @@ disk are set to 0. After Reche & Cid 2026, who report that this correction helps
 
 Run: ``.venv/bin/python -m filseg.flatten`` writes ``train_images_flat.npy`` and
 ``test_images_flat.npy`` next to the plain cache, from the plain cached images.
+
+Status: not used by the submitted pipeline (submission 8). The limb-darkening-corrected input (``--images flat``) gave
+no gain on fold 0 (tuned PQ 0.4112 against 0.4160 for the plain input). docs/DESIGN.md, "Limb-darkening
+correction as input, fold 0".
 """
 
 from __future__ import annotations

@@ -10,6 +10,11 @@ so ``filseg.tune`` and ``scripts/experiments/component_tree.py`` read it unchang
 
 Run (fold 0, the 2-view maps saved during training):
 ``.venv/bin/python -m filseg.ensemble --runs unet_r34_1536 unet_cnxt_1536 --out ens_r34_cnxt_1536 --folds 0 --probs val_probs.npy``
+
+Status: only ``pool_views`` is on the submitted path, and only when ``filseg.predict`` is given more than one
+checkpoint with ``--tree-scorer``; submission 8 uses one model, so it is not exercised. ``average_runs`` and the
+command line were for the ConvNeXt-T plus ResNet-34 test, which was not continued. docs/DESIGN.md,
+"ConvNeXt-T U-Net, fold 0".
 """
 
 from __future__ import annotations

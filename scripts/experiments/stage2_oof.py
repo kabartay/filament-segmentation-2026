@@ -286,7 +286,7 @@ def step_train(tag: str, arch: str, encoder: str, epochs: int, batch: int, lr: f
             (``drew_fraction``), trained with this loss weight; its OOF output goes to ``<tag>_drew.npy``.
         limit: smoke tests only: use at most this many training crops per kind per fold.
     """
-    device = os.environ.get("FILSEG_DEVICE") or "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    device = os.environ.get("FILSEG_DEVICE") or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     X = np.load(OUT / "crops.npy", mmap_mode="r")
     Y = np.load(OUT / "targets.npy", mmap_mode="r")
     meta = pickle.load(open(OUT / "meta.pkl", "rb"))
