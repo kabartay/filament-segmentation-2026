@@ -60,7 +60,7 @@ TREE = load_tree_scorer(ROOT / "weights" / "tree_scorer_1536.pkl")
 REFINERS = [ROOT / "weights" / f"stage2_{tag}_f{k}.pt" for tag in ("upp", "jit") for k in range(5)]
 OUTPUT = ROOT / "submissions" / "notebook_submission.csv"
 RES = 1536  # network input resolution
-print("device:", DEVICE, "| test images:", TEST_IMAGES.relative_to(ROOT))
+print("device:", DEVICE, "| test images:", TEST_IMAGES.relative_to(ROOT) if TEST_IMAGES.is_relative_to(ROOT) else TEST_IMAGES)
 """)
 md(r"""
 ## 2. Data
