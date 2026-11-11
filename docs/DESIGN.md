@@ -6,7 +6,8 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 
 **Final state (2026-11-11).** Submission 8 is the one final selection: out-of-fold PQ 0.4399 [0.4305, 0.4487] on
 all 707 training images, public LB 0.37. Modelling stopped on 2026-11-11; the last experiment (`uppj`, end of
-section 5) was rejected. Submission history:
+section 5) was rejected. The Google form was submitted on 2026-11-11 (sub8 CSV, report, repository URL) and the
+repository was made public the same day at the owner's request. Submission history:
 
 | Sub | Date | Pipeline | Local PQ | Public LB |
 |---|---|---|---|---|
