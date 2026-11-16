@@ -10,7 +10,7 @@ section 5) was rejected. The Google form was submitted on 2026-11-11 (sub8 CSV, 
 repository was made public the same day at the owner's request.
 
 **Closed (2026-11-16).** The competition closed on 2026-11-15 23:59 CDT. Submission 8 scores 0.36 on the private
-leaderboard (public 0.37); submission 7 also scores 0.36. The private score never drops from one submission to the
+leaderboard (public 0.37), rank 406 of 1,567 teams (public rank 562, up 156); submission 7 also scores 0.36. The private score never drops from one submission to the
 next, in line with the rise in out-of-fold PQ from submission 3 on, so the out-of-fold estimate pointed the right way
 even where the public leaderboard could not separate the steps. The leaderboard is 70% of the final ranking; the organisers' review of the report and code is the
 other 30%, with winners due on 2026-11-30. The tag `submitted` marks the repository as it stood at the close.
