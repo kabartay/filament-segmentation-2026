@@ -7,18 +7,25 @@ experiment showed. Numbers are on our own validation folds unless marked "LB".
 **Final state (2026-11-11).** Submission 8 is the one final selection: out-of-fold PQ 0.4399 [0.4305, 0.4487] on
 all 707 training images, public LB 0.37. Modelling stopped on 2026-11-11; the last experiment (`uppj`, end of
 section 5) was rejected. The Google form was submitted on 2026-11-11 (sub8 CSV, report, repository URL) and the
-repository was made public the same day at the owner's request. Submission history:
+repository was made public the same day at the owner's request.
 
-| Sub | Date | Pipeline | Local PQ | Public LB |
-|---|---|---|---|---|
-| 1 | 2026-11-03 | U-Net R34 1024 px, fold 0, epoch 10, hand rule | 0.389 (fold 0) | 0.32 |
-| 2 | 2026-11-03 | the same, 40 epochs | 0.415 (fold 0) | 0.35 |
-| 3 | 2026-11-04 | average of the 5 fold models | 0.410 (OOF) | 0.35 |
-| 4 | 2026-11-04 | one model on all images, hand rule | 0.409 (OOF) | 0.35 |
-| 5 | 2026-11-05 | 1536 px, 4 flips, single threshold + scorer | 0.422 (OOF) | 0.35 |
-| 6 | 2026-11-05 | 12-level tree, hurdle scorer, exact selection | 0.427 (OOF) | 0.36 |
-| 7 | 2026-11-08 | + one U-Net crop refiner per fold | 0.433 (OOF) | 0.37 |
-| 8 | 2026-11-10 | + UNet++ and jitter U-Net refiners (ten models) | 0.440 (OOF) | 0.37 |
+**Closed (2026-11-16).** The competition closed on 2026-11-15 23:59 CDT. Submission 8 scores 0.36 on the private
+leaderboard (public 0.37); submission 7 also scores 0.36. The private score never drops from one submission to the
+next, in line with the rise in out-of-fold PQ from submission 3 on, so the out-of-fold estimate pointed the right way
+even where the public leaderboard could not separate the steps. The leaderboard is 70% of the final ranking; the organisers' review of the report and code is the
+other 30%, with winners due on 2026-11-30. The tag `submitted` marks the repository as it stood at the close.
+No further work is planned. Submission history:
+
+| Sub | Date | Pipeline | Local PQ | Public LB | Private LB |
+|---|---|---|---|---|---|
+| 1 | 2026-11-03 | U-Net R34 1024 px, fold 0, epoch 10, hand rule | 0.389 (fold 0) | 0.32 | 0.30 |
+| 2 | 2026-11-03 | the same, 40 epochs | 0.415 (fold 0) | 0.35 | 0.33 |
+| 3 | 2026-11-04 | average of the 5 fold models | 0.410 (OOF) | 0.35 | 0.33 |
+| 4 | 2026-11-04 | one model on all images, hand rule | 0.409 (OOF) | 0.35 | 0.33 |
+| 5 | 2026-11-05 | 1536 px, 4 flips, single threshold + scorer | 0.422 (OOF) | 0.35 | 0.34 |
+| 6 | 2026-11-05 | 12-level tree, hurdle scorer, exact selection | 0.427 (OOF) | 0.36 | 0.34 |
+| 7 | 2026-11-08 | + one U-Net crop refiner per fold | 0.433 (OOF) | 0.37 | 0.36 |
+| 8 | 2026-11-10 | + UNet++ and jitter U-Net refiners (ten models) | 0.440 (OOF) | 0.37 | 0.36 |
 
 How to read this file: sections 1-3 are the scoring, the data facts and the submitted pipeline; section 4 is the
 plan as written during the competition (historical); section 5 is the dated log of every experiment, in order;

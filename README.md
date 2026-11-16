@@ -7,26 +7,27 @@ Panoptic Quality (PQ) against each MAGFiLO annotator separately.
 **Result.** One U-Net (ResNet-34 encoder) at 1536 px over four flipped views; learned instance selection on a
 tree of candidates at twelve thresholds; a second stage that redraws each selected filament at native resolution in
 a crop turned along its own axis. Out-of-fold PQ **0.440** (95% bootstrap interval 0.431-0.449) on all 707 training
-images (5-fold split by calendar month), public leaderboard 0.37. For scale, one human annotator scored against
+images (5-fold split by calendar month), public leaderboard 0.37, private leaderboard 0.36. For scale, one human annotator scored against
 another on the same images gives PQ 0.340.
 
-| Submission | Pipeline | Local PQ | Public LB |
-|---|---|---|---|
-| 1 | U-Net R34 1024 px, fold 0, epoch 10, hand rule | 0.389 (fold 0) | 0.32 |
-| 2 | the same, 40 epochs | 0.415 (fold 0) | 0.35 |
-| 3 | average of 5 fold models, hand rule | 0.410 (OOF) | 0.35 |
-| 4 | one model on all images, hand rule | 0.409 (OOF) | 0.35 |
-| 5 | 1536 px, 4 flips, single threshold + learned scorer | 0.422 (OOF) | 0.35 |
-| 6 | 12-level tree + hurdle scorer + exact selection (stage 1) | 0.427 (OOF) | 0.36 |
-| 7 | stage 1 + one U-Net crop refiner per fold | 0.433 (OOF) | 0.37 |
-| **8 (final)** | stage 1 + UNet++ and jitter U-Net refiners, ten models | **0.440 (OOF)** | 0.37 |
+| Submission | Pipeline | Local PQ | Public LB | Private LB |
+|---|---|---|---|---|
+| 1 | U-Net R34 1024 px, fold 0, epoch 10, hand rule | 0.389 (fold 0) | 0.32 | 0.30 |
+| 2 | the same, 40 epochs | 0.415 (fold 0) | 0.35 | 0.33 |
+| 3 | average of 5 fold models, hand rule | 0.410 (OOF) | 0.35 | 0.33 |
+| 4 | one model on all images, hand rule | 0.409 (OOF) | 0.35 | 0.33 |
+| 5 | 1536 px, 4 flips, single threshold + learned scorer | 0.422 (OOF) | 0.35 | 0.34 |
+| 6 | 12-level tree + hurdle scorer + exact selection (stage 1) | 0.427 (OOF) | 0.36 | 0.34 |
+| 7 | stage 1 + one U-Net crop refiner per fold | 0.433 (OOF) | 0.37 | 0.36 |
+| **8 (final)** | stage 1 + UNet++ and jitter U-Net refiners, ten models | **0.440 (OOF)** | 0.37 | 0.36 |
 
 From submission 4 on, the submitted model is trained on all images and the local PQ is that of the same pipeline
 run on the five fold models' out-of-fold predictions. Every step from 5 to 8 was adopted on a paired bootstrap over
 images of those predictions; submission 8
 gains +0.013 [0.010, 0.016] over stage 1 and +0.007 [0.005, 0.009] over submission 7, on all five folds. The public
 leaderboard scores about 90 images to two decimals (about +-0.027), so it cannot resolve these steps and was never
-used to choose. `filseg/metric.py` reproduces the organisers' PQ notebook exactly.
+used to choose. On the private leaderboard, revealed after the close, the score never drops from one submission to the
+next, in line with the rise in out-of-fold PQ from submission 3 on (7 and 8 tie at two decimals). `filseg/metric.py` reproduces the organisers' PQ notebook exactly.
 
 ## Reproduce the submitted predictions
 
