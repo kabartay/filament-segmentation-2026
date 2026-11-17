@@ -1,7 +1,7 @@
 <!--
 Kaggle solution writeup, published 2026-11-17 at
 https://www.kaggle.com/competitions/filament-segmentation-2026/writeups/public-0-37-private-0-36-u-net-a-threshold-tre
-(Team tab > Create Solution Writeup).
+(Team tab > Create Solution Writeup); DOI 10.34740/KAGGLE/W/127014.
 Title (field):    Public 0.37 / Private 0.36: U-Net, a threshold tree and rotated-crop refiners
 Subtitle (field): One U-Net at 1536 px, learned instance selection on a 12-level component tree, and native-resolution refiners in crops turned along each filament
 Card image:       docs/figures/writeup_card.jpg (560 x 280)
@@ -136,12 +136,13 @@ often disagree on how to group or extend a filament. 37% of our errors are near 
 ## How to cite this solution
 
 ```bibtex
-@misc{organokov2026filament,
-  author       = {Mukharbek Organokov},
-  title        = {Public 0.37 / Private 0.36: U-Net, a threshold tree and rotated-crop refiners},
-  year         = {2026},
-  publisher    = {Kaggle},
-  howpublished = {\url{https://www.kaggle.com/competitions/filament-segmentation-2026/writeups/public-0-37-private-0-36-u-net-a-threshold-tre}},
-  note         = {Solar Filament Segmentation Challenge 2026. Code: \url{https://github.com/kabartay/filament-segmentation-2026}}
+@article{mukharbek_organokov_2026,
+  title     = {Public 0.37 / Private 0.36: U-Net, a threshold tree and rotated-crop refiners},
+  url       = {https://www.kaggle.com/w/127014},
+  DOI       = {10.34740/KAGGLE/W/127014},
+  journal   = {Kaggle},
+  publisher = {Kaggle},
+  author    = {Mukharbek Organokov},
+  year      = {2026}
 }
 ```

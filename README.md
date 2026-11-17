@@ -29,8 +29,8 @@ leaderboard scores about 90 images to two decimals (about +-0.027), so it cannot
 used to choose. On the private leaderboard, revealed after the close, the score never drops from one submission to the
 next, in line with the rise in out-of-fold PQ from submission 3 on (7 and 8 tie at two decimals). `filseg/metric.py` reproduces the organisers' PQ notebook exactly.
 
-Solution writeup on Kaggle: [Public 0.37 / Private 0.36: U-Net, a threshold tree and rotated-crop refiners](https://www.kaggle.com/competitions/filament-segmentation-2026/writeups/public-0-37-private-0-36-u-net-a-threshold-tre)
-(source: `docs/kaggle-writeup.md`).
+Solution writeup on Kaggle: [Public 0.37 / Private 0.36: U-Net, a threshold tree and rotated-crop refiners](https://www.kaggle.com/w/127014),
+DOI [10.34740/KAGGLE/W/127014](https://doi.org/10.34740/KAGGLE/W/127014) (source: `docs/kaggle-writeup.md`).
 
 ## Reproduce the submitted predictions
 
@@ -175,6 +175,20 @@ The threshold tree with its hurdle scorer and exact selection, and the stage-2 r
 
 Earlier submissions' weights (the submission-7 U-Net refiners and the submission-4 1024 px model) are not
 distributed; the submitted pipeline (submission 8) needs only the files listed above.
+
+## Citation
+
+```bibtex
+@article{mukharbek_organokov_2026,
+  title     = {Public 0.37 / Private 0.36: U-Net, a threshold tree and rotated-crop refiners},
+  url       = {https://www.kaggle.com/w/127014},
+  DOI       = {10.34740/KAGGLE/W/127014},
+  journal   = {Kaggle},
+  publisher = {Kaggle},
+  author    = {Mukharbek Organokov},
+  year      = {2026}
+}
+```
 
 ## Licence
 
