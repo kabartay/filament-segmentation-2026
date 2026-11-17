@@ -29,6 +29,9 @@ leaderboard scores about 90 images to two decimals (about +-0.027), so it cannot
 used to choose. On the private leaderboard, revealed after the close, the score never drops from one submission to the
 next, in line with the rise in out-of-fold PQ from submission 3 on (7 and 8 tie at two decimals). `filseg/metric.py` reproduces the organisers' PQ notebook exactly.
 
+Solution writeup on Kaggle: [Public 0.37 / Private 0.36: U-Net, a threshold tree and rotated-crop refiners](https://www.kaggle.com/competitions/filament-segmentation-2026/writeups/public-0-37-private-0-36-u-net-a-threshold-tre)
+(source: `docs/kaggle-writeup.md`).
+
 ## Reproduce the submitted predictions
 
 ```bash
