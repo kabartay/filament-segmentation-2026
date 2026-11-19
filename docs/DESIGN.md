@@ -12,7 +12,9 @@ repository was made public the same day at the owner's request.
 **Closed (2026-11-16).** The competition closed on 2026-11-15 23:59 CDT. Submission 8 scores 0.36 on the private
 leaderboard (public 0.37), rank 406 of 1,567 teams (public rank 562, up 156); submission 7 also scores 0.36.
 On 2026-11-17 the organisers removed 99 teams, nearly all of them above us: the 0.70 public leader, 78 of the
-0.55 cluster and 18 more at 0.56-0.64 (1,567 to 1,468 teams); our public rank went from 562 to 463. The private score never drops from one submission to the
+0.55 cluster and 18 more at 0.56-0.64 (1,567 to 1,468 teams); our public rank went from 562 to 463.
+On 2026-11-18 a second clean-up brought the top private score from 0.54 to 0.42; the organisers state the removed
+teams leaked ground-truth information. Our private rank is now 297. The new top 20 were invited to submit reports. The private score never drops from one submission to the
 next, in line with the rise in out-of-fold PQ from submission 3 on, so the out-of-fold estimate pointed the right way
 even where the public leaderboard could not separate the steps. The leaderboard is 70% of the final ranking; the organisers' review of the report and code is the
 other 30%, with winners due on 2026-11-30. The tag `submitted` marks the repository as it stood at the close.
